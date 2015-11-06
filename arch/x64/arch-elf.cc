@@ -105,7 +105,15 @@ bool object::arch_relocate_rela(u32 type, u32 sym, void *addr,
 
 bool object::arch_relocate_jump_slot(u32 sym, void *addr, Elf64_Sxword addend)
 {
-    *static_cast<void**>(addr) = symbol(sym).relocated_addr();
+    //*static_cast<void**>(addr) = symbol(sym).relocated_addr();
+    elf::symbol_module sym_mod;
+    sym_mod = symbol(sym);
+    if(sym_mod.symbol) {
+        *static_cast<void**>(addr) = sym_mod.relocated_addr();
+    }
+    else {
+        // missing symbol, ignore it
+    }
     return true;
 }
 
