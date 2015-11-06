@@ -243,3 +243,60 @@ extern "C" {
         return "OSv";
     }
 }
+
+/*
+argz_create_sep is used in OpenFOAM.
+Code is stolen from https://chromium.googlesource.com/native_client/nacl-newlib/+/master/newlib/libc/argz.
+GPL licence?
+*/
+//error_t
+extern "C" {
+int 
+argz_create_sep(
+       const char *string ,
+       int sep ,
+       char **argz ,
+       size_t *argz_len)
+{
+  int len = 0;
+  int i = 0;
+  int num_strings = 0;
+  char delim[2];
+  char *running = 0;
+  char *old_running = 0;
+  char *token = 0;
+  char *iter = 0;
+  *argz_len = 0;
+  if (!string || string[0] == '\0')
+    {
+      *argz= NULL;
+      return 0;
+    }
+  delim[0] = sep;
+  delim[1] = '\0';
+  running = strdup(string);
+  old_running = running;
+  while ((token = strsep(&running, delim)))
+    {
+      len = strlen(token);
+      *argz_len += (len + 1);
+      num_strings++;
+    }
+  if(!(*argz = (char *)malloc(*argz_len)))
+    return ENOMEM;
+  free(old_running);
+  running = strdup(string);
+  old_running = running;
+  iter = *argz;
+  for (i = 0; i < num_strings; i++)
+    {
+      token = strsep(&running, delim);
+      len = strlen(token) + 1;
+      memcpy(iter, token, len);
+      iter += len;
+    }
+  free(old_running);
+  return 0;
+}
+
+}
