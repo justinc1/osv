@@ -557,7 +557,11 @@ symbol_module object::symbol(unsigned idx)
         return symbol_module(sym, this);
     }
     if (!ret.symbol) {
+        /*
         abort("%s: failed looking up symbol %s\n",
+                pathname().c_str(), demangle(name).c_str());
+                */
+        fprintf(stderr, "ERROR ignored in %s: failed looking up symbol %s\n",
                 pathname().c_str(), demangle(name).c_str());
     }
     return ret;
