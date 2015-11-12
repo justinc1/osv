@@ -24,6 +24,7 @@ using namespace app_json;
 
 static void exec_app(const std::string& cmnd_line) {
     bool ok;
+    printf("REST API exec_app: cmnd_line %s\n", cmnd_line.c_str());
     auto new_commands = osv::parse_command_line(cmnd_line, ok);
     if (!ok) {
         throw bad_param_exception("Bad formatted command");
@@ -32,10 +33,16 @@ static void exec_app(const std::string& cmnd_line) {
         auto suffix = cmnd.back();
         if (suffix == ";") {
             throw bad_param_exception("The use of ; is not allowed, use & for multiple commands");
+            // printf("But ; might be part of program parameters (unescaped)\n");
         }
     }
     for (auto cmnd: new_commands) {
         std::vector<std::string> c(cmnd.begin(), std::prev(cmnd.end()));
+        printf("REST API exec_app: run <>");
+        for (auto cc: cmnd) {
+            printf(" %s", cc.c_str());
+        }
+        printf(" <>\n");
         osv::run(c);
     }
 }
