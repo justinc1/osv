@@ -144,4 +144,7 @@ std::shared_ptr<osv::application> run(std::string path,
 /**@}*/
 
 }
+
+int osv_run_app_in_namespace(const char *filename, char *const argv[], char *const envp[]);
+
 #endif /* INCLUDED_OSV_RUN_H */
