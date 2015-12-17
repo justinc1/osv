@@ -396,8 +396,8 @@ class put_file_handler : public handler_base {
         set_and_validate_params(params, req, opStr, full_path);
         ns_putFile::op op = ns_putFile::str2op(opStr);
         mode_t permission = 0777;
-        if ((*params)["permission"] != "") {
-            permission = strtol((*params)["permission"].c_str(), nullptr, 8);
+        if (req.get_query_param("permission") != "") {
+            permission = strtol(req.get_query_param("permission").c_str(), nullptr, 8);
         }
         string destination = req.get_query_param("destination");
 
