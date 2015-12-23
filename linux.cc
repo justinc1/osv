@@ -29,6 +29,7 @@ extern "C" long gettid()
 {
     return sched::thread::current()->id();
 }
+#include <osv/run.hh> /* osv_waittid */
 
 // We don't expect applications to use the Linux futex() system call (it is
 // normally only used to implement higher-level synchronization mechanisms),
@@ -283,6 +284,8 @@ long syscall(long number, ...)
     SYSCALL3(sched_getaffinity_syscall, pid_t, unsigned, unsigned long *);
     SYSCALL6(long_mmap, void *, size_t, int, int, int, off_t);
     SYSCALL2(munmap, void *, size_t);
+    SYSCALL5(osv_execve, const char*, char *const*, char *const*, long*, int);
+    SYSCALL3(osv_waittid, long, int *, int);
     }
 
     abort("syscall(): unimplemented system call %d. Aborting.\n", number);

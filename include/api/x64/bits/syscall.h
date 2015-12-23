@@ -312,6 +312,9 @@
 #define __NR_process_vm_writev			311
 #define __NR_kcmp				312
 #define __NR_finit_module			313
+/* OSv only */
+#define __NR_osv_execve 			1000
+#define __NR_osv_waittid			1001
 
 #undef __NR_fstatat
 #undef __NR_pread
@@ -641,6 +644,9 @@
 #define SYS_process_vm_writev			311
 #define SYS_kcmp				312
 #define SYS_finit_module			313
+/* OSv only */
+#define SYS_osv_execve				1000
+#define SYS_osv_waittid 			1001
 
 #undef SYS_fstatat
 #undef SYS_pread

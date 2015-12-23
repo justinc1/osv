@@ -149,6 +149,8 @@ std::shared_ptr<osv::application> run(std::string path,
 
 }
 
-int osv_run_app_in_namespace(const char *filename, char *const argv[], char *const envp[]);
+int osv_run_app_in_namespace(const char *filename, char *const argv[], char *const envp[], long* thread_id, int notification_fd);
+extern "C" long osv_execve(const char *path, char *const argv[], char *const envp[], long* thread_id, int notification_fd);
+extern "C" long osv_waittid(long tid, int *status, int options);
 
 #endif /* INCLUDED_OSV_RUN_H */
