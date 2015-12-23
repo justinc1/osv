@@ -40,6 +40,7 @@ std::vector<std::thread> exec_threads;
  * It is used to implement waitpid like functionality for threads (osv_waittid).
  **/
 std::vector<thread_status> exec_thread_status;
+mutex exec_mutex;
 
 int osv_thread_run_app_in_namespace(const char *filename,
                                     const std::vector<std::string> *args,
@@ -68,8 +69,11 @@ int osv_thread_run_app_in_namespace(const char *filename,
     fprintf(stderr, "osv_thread_run_app_in_namespace... tid=%ld DONE\n", tid);
     thread_status th_status = {tid, ret};
 
-    // TODO lock
-    exec_thread_status.push_back(th_status);
+    /* Check that exec_mutex is in the same ELF namespace */
+    fprintf(stderr, "osv_thread_run_app_in_namespace &exec_mutex=%p\n", &exec_mutex);
+    WITH_LOCK(exec_mutex) {
+        exec_thread_status.push_back(th_status);
+    }
 
     // remove current thread from exec_threads ?
     // Trigger event notification via file descriptor (fd created with eventfd).
@@ -176,8 +180,13 @@ long osv_waittid(long tid, int *status, int options) {
     }
     
     // TODO mutex
-    thread_status th_status = exec_thread_status.back();
-    exec_thread_status.pop_back();
+    thread_status th_status;
+    /* Check that exec_mutex is in the same ELF namespace */
+    fprintf(stderr, "osv_waittid &exec_mutex=%p DONE\n", &exec_mutex);
+    WITH_LOCK(exec_mutex) {
+        th_status = exec_thread_status.back();
+        exec_thread_status.pop_back();
+    }
     fprintf(stderr, "TTRT osv_waittid th_status .tid=%ld .exit_code=%d\n",
         th_status.tid, th_status.exit_code);
     if(status) {
