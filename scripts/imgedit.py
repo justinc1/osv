@@ -3,6 +3,7 @@
 import sys, struct
 import subprocess
 import time
+import magic
 
 from nbd_client import nbd_client
 
@@ -143,20 +144,20 @@ class raw_file(file):
 
 
 def image_file(filename):
-    # "-f raw bare.raw"
-    if img_mode == 'raw':
-        print 'imgedit.py filename = %s' % filename
-        if(filename.split()[0] == '-f'):
-            filename_real = filename.split()[2]
-        else:
-            filename_real = filename
-        return raw_file(filename_real, 'rb+');
+    print 'imgedit.py filename = %s' % filename
+    if(filename.split()[0] == '-f'):
+        filename_real = filename.split()[2]
     else:
+        filename_real = filename
+    m = magic.Magic()
+    m_id = m.id_filename(filename_real)
+    m.close()
+    if 'QCOW Image' in m_id:
+        # run.py still edits qcow2
         return nbd_file(filename);
+    elif 'DOS/MBR boot sector' in m_id:
+        return raw_file(filename_real, 'rb+');
 
-
-#img_mode = 'qcow2'
-img_mode = 'raw'
 
 if cmd == 'setargs':
     img = args[0]
