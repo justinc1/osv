@@ -132,16 +132,42 @@ class nbd_file(object):
     def size(self):
         self._client.size()
 
+
+class raw_file(file):
+    def size(self):
+        old_pos = self.tell()
+        self.seek(0,2)
+        sz = self.tell()
+        self.seek(old_pos)
+        return sz;
+
+
+def image_file(filename):
+    # "-f raw bare.raw"
+    if img_mode == 'raw':
+        print 'imgedit.py filename = %s' % filename
+        if(filename.split()[0] == '-f'):
+            filename_real = filename.split()[2]
+        else:
+            filename_real = filename
+        return raw_file(filename_real, 'rb+');
+    else:
+        return nbd_file(filename);
+
+
+#img_mode = 'qcow2'
+img_mode = 'raw'
+
 if cmd == 'setargs':
     img = args[0]
     args = args[1:]
     argstr = str.join(' ', args)
-    with nbd_file(img) as f:
+    with image_file(img) as f:
         f.seek(args_offset)
         write_cstr(f, argstr)
 elif cmd == 'getargs':
     img = args[0]
-    with nbd_file(img) as f:
+    with image_file(img) as f:
         f.seek(args_offset)
         print(read_cstr(f))
 elif cmd == 'setsize':
@@ -149,7 +175,7 @@ elif cmd == 'setsize':
     size = int(args[1])
     block_size = 32 * 1024
     blocks = (size + block_size - 1) // block_size
-    f = nbd_file(img)
+    f = image_file(img)
     f.seek(0x10)
     f.write(struct.pack('H', blocks))
     f.close()
@@ -159,8 +185,7 @@ elif cmd == 'setpartition':
     start = int(args[2])
     size = int(args[3])
     partition = 0x1be + ((partition - 1) * 0x10)
-    f = nbd_file(img)
-
+    f = image_file(img)
     fsize = f.size()
 
     cyl, head, sec = chs(start // 512)
