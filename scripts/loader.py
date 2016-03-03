@@ -15,6 +15,27 @@ apps_dir = os.path.join(osv_dir, 'apps')
 external = os.path.join(osv_dir, 'external', arch)
 modules = os.path.join(osv_dir, 'modules')
 
+xmodules = []
+xmodules.append(os.path.join(osv_dir, '../mike-apps/tcp-client'))
+xmodules.append(os.path.join(osv_dir, '../mike-apps/vt-test'))
+## xmodules.append(os.path.join(os.environ['HOME'], 'openmpi-bin/lib'))
+#
+ompi_dir = 'open-mpi'
+openfoam_dir = 'OpenFOAM'
+if 0:
+    ompi_dir = 'open-mpi-orig'
+    openfoam_dir = 'OpenFOAM-orig'
+xmodules.append(os.path.join(osv_dir, '../mike-apps/' + ompi_dir + '/ompi-release/build-osv-symbols/orte/tools/orted/.libs'))
+xmodules.append(os.path.join(osv_dir, '../mike-apps/' + ompi_dir + '/ompi-release/build-osv-symbols/orte/tools/orterun/.libs/'))
+xmodules.append(os.path.join(osv_dir, '../mike-apps/' + ompi_dir + '/ompi-release/build-osv-symbols/ompi/.libs'))
+xmodules.append(os.path.join(osv_dir, '../mike-apps/' + ompi_dir + '/ompi-release/build-osv-symbols/opal/.libs/'))
+xmodules.append(os.path.join(osv_dir, '../mike-apps/' + ompi_dir + '/ompi-release/build-osv-symbols/orte/.libs'))
+xmodules.append(os.path.join(osv_dir, '../mike-apps/' + ompi_dir + '/ompi-release/build-osv-symbols/ompi/contrib/vt/vt/vtlib/.libs'))
+xmodules.append(os.path.join(osv_dir, '../mike-apps/' + ompi_dir + '/ompi-release/build-osv-symbols/ompi/contrib/vt/vt/tools/vtunify/mpi/.libs'))
+xmodules.append(os.path.join(osv_dir, '../mike-apps/' + ompi_dir + '/ompi-release/build-osv-symbols/ompi/contrib/vt/vt/tools/vtunify/.libs'))
+xmodules.append(os.path.join(osv_dir, '../mike-apps/' + ompi_dir + '/ompi-release/build-osv-symbols/ompi/contrib/vt/vt/extlib/otf/otflib/.libs'))
+xmodules.append(os.path.join(osv_dir, '../mike-apps/' + openfoam_dir + '/ROOTFS/usr/lib/'))
+
 sys.path.append(os.path.join(osv_dir, 'scripts'))
 
 from osv.trace import (Trace, Thread, TracePoint, BacktraceFormatter,
@@ -161,7 +182,9 @@ def translate(path):
         return file
     # Next, search for file in configured directories
     name = os.path.basename(path)
-    for top in [build_dir, external, modules, apps_dir, '/zfs']:
+    all_dirs = [build_dir, external, modules, apps_dir, '/zfs']
+    all_dirs.extend(xmodules)
+    for top in all_dirs:
         for root, dirs, files in os.walk(top):
             if name in files:
                 return os.path.join(root, name)
