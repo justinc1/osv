@@ -213,6 +213,39 @@ int sigprocmask(int how, const sigset_t* _set, sigset_t* _oldset)
     return 0;
 }
 
+int sigsuspend(const sigset_t *mask) {
+    auto new_mask = from_libc(mask)->mask;
+    auto old_mask = thread_signals()->mask;
+    int sig;
+
+    // Temporarily replace thread's mask set with input set.
+    thread_signals()->mask = new_mask;
+    for (unsigned i = 0; i < nsignals; ++i) {
+        if (new_mask.test(i) and !old_mask.test(i)) {
+            unwait_for_signal(i);
+        } else if (old_mask.test(i) and !new_mask.test(i)) {
+            wait_for_signal(i);
+        }
+    }
+
+    // Wait until we receive a signal, then call its handler.
+    sched::thread::wait_until([&sig] { return sig = thread_pending_signal; });
+    thread_pending_signal = 0;
+    const auto sa = signal_actions[sig];
+    sa.sa_sigaction(sig, nullptr, nullptr);
+
+    // Restore original mask.
+    thread_signals()->mask = old_mask;
+    for (unsigned i = 0; i < nsignals; ++i) {
+        if (old_mask.test(i) and !new_mask.test(i)) {
+            unwait_for_signal(i);
+        } else if (new_mask.test(i) and !old_mask.test(i)) {
+            wait_for_signal(i);
+        }
+    }
+    return -1;
+}
+
 int sigaction(int signum, const struct sigaction* act, struct sigaction* oldact)
 {
     // FIXME: We do not support any sa_flags besides SA_SIGINFO.
