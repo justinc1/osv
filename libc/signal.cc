@@ -228,8 +228,17 @@ int sigsuspend(const sigset_t *mask) {
         }
     }
 
-    // Wait until we receive a signal, then call its handler.
-    sched::thread::wait_until([&sig] { return sig = thread_pending_signal; });
+    // Wait until we receive unblocked signal, then call its handler.
+    sched::thread::wait_until([new_mask] {
+        if (new_mask.test(thread_pending_signal)) {
+            // Ignore masked signals.
+            thread_pending_signal = 0;
+            return false;
+        } else {
+            return true;
+        }
+    });
+    sig = thread_pending_signal;
     thread_pending_signal = 0;
     const auto sa = signal_actions[sig];
     sa.sa_sigaction(sig, nullptr, nullptr);
