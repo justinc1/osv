@@ -23,32 +23,47 @@
 #include <assert.h>
 #include <iostream>
 
-std::atomic<int> siguser_received { 0 };
-void handler(int sig) { siguser_received = 1;}
+std::atomic<int> siguser1_received { 0 };
+std::atomic<int> siguser2_received { 0 };
+void handler1(int sig) {
+    printf("Siguser1 handler received signal %d\n", sig);
+    siguser1_received += 1;
+}
+void handler2(int sig) {
+    printf("Siguser2 handler received signal %d\n", sig);
+    siguser2_received += 1;
+}
 
 int main(int ac, char** av)
 {
     int sig;
-    auto sr = signal(SIGUSR1, handler);
+    auto sr = signal(SIGUSR1, handler1);
+    assert(sr != SIG_ERR);
+    sr = signal(SIGUSR2, handler2);
     assert(sr != SIG_ERR);
 
     sigset_t set, old_set, full_set;
-    sigfillset(&set);
     sigfillset(&full_set);
-    sigdelset(&set, SIGUSR1);
+
     sigprocmask(SIG_SETMASK, &full_set, &old_set);
     printf("Masked all signals.\n");
 
-    // Start a thread that sends SIGUSR1 to proc 0.
-    std::thread thread1([&] { kill(0, SIGUSR1); });
-    printf("Supending after unblocking SIGUSR1..\n");
+    // Start a thread that sends SIGUSR1 and SIGUSR2 to proc 0.
+    sigprocmask(SIG_SETMASK, &full_set, nullptr);
+    std::thread thread1([&] { kill(0, SIGUSR1); kill(0, SIGUSR2);});
+    printf("Test 1: Supend after unblocking SIGUSR1 and SIGUSR2..\n");
+    sigfillset(&set);
+    sigdelset(&set, SIGUSR2);
     sigsuspend(&set);
     thread1.join();
-    assert(siguser_received == 1);
-    printf("Verified handler for SIGUSR1 is invoked.\n");
+    assert(siguser1_received == 0 && siguser2_received == 1);
+    printf("Verified handler for SIGUSR2 is invoked.\n");
 
     // Reset proc mask.
+    printf("Test 2: Reset proc mask to process SIGUSR1 generated from Test 1\n");
     sigprocmask(SIG_SETMASK, &old_set, nullptr);
+    assert(siguser1_received == 1);
+    printf("Verified handler for SIGUSR1 is invoked after restoring mask.\n");
     printf ("Done.\n");
     return 0;
 }
