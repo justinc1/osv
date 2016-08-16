@@ -195,6 +195,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
     pthread *t;
     sigset_t sigset;
     sigprocmask(SIG_SETMASK, nullptr, &sigset);
+    bool pinned_from_attr = false;
 
     if (attr != nullptr) {
         thread_attr tmp(*from_libc(attr));
@@ -203,6 +204,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
             // pin it to the corresponding CPU. If the set exists, but has no
             // CPUs set, we do nothing. Otherwise, warn the user, and do
             // nothing.
+            pinned_from_attr = true;
             int count = CPU_COUNT(tmp.cpuset);
             if (count == 0) {
                 // Having a cpuset with no CPUs in it is invalid.
@@ -230,6 +232,12 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
 
     *thread = t->to_libc();
     t->start();
+    // Newly created thread should inherit cpu pinning of creator thread.
+    if (pinned_from_attr == false) {
+        cpu_set_t cpuset;
+        sched_getaffinity(0, sizeof(cpuset), &cpuset);
+        pthread_setaffinity_np(*thread, sizeof(cpuset), &cpuset);
+    }
     return 0;
 }
 
