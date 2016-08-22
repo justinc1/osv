@@ -3,6 +3,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <osv/osv_execve.h>
+#include <osv/osv_c_wrappers.h>
+#include <sys/types.h>
 
 /*
  * Usage: S0 ID_MAX path-to-payload payload-param-1 payload-param-2 ...
@@ -14,7 +16,7 @@ int main(int argc, char **argv)
   int ii, jj;
   int id_max = 10;
   char *prog_filename = NULL; // "/usr/lib/tst-execve-payload.so";
-  fprintf(stderr, "TT In tst-execve.c main.\n");
+  fprintf(stderr, "TT In tst-execve.c main, my tid=%d.\n", gettid());
   fprintf(stderr, "TT argc %d\n", argc);
   for (ii=0; ii<argc; ii++) {
     fprintf(stderr, "TT argv[%d] = %s\n", ii, argv[ii]);
@@ -30,9 +32,10 @@ int main(int argc, char **argv)
     return 1;
   }
 
+  int ret;
   int id;
   char ** prog_argv = NULL;
-  int th_id = -1;
+  long th_id = -1;
   char ** prog_envp = NULL;
 
   prog_argv = (char**)malloc(1024);
@@ -52,12 +55,19 @@ int main(int argc, char **argv)
   prog_envp[4] = NULL;
 
   for (id=0; id<id_max; id++) {
+    pid_t *app_tids = NULL;
+    size_t app_tids_len = 0;
+
     snprintf(prog_argv[1], 1023, "%d", id);
     snprintf(prog_envp[3], 1023, "MYID=%d", id);
 
     fprintf(stderr, "TT id=%d before osv_execve\n", id);
-    th_id = osv_execve(prog_filename, prog_argv, prog_envp, NULL, -1);
-    fprintf(stderr, "TT id=%d osv_execve ret %d\n", id, th_id);
+    ret = osv_execve(prog_filename, prog_argv, prog_envp, &th_id, -1);
+    fprintf(stderr, "TT id=%d osv_execve ret=%d, th_id=%d\n", id, ret, th_id);
+    
+    osv_get_all_app_threads(th_id, &app_tids, &app_tids_len);
+    //usleep(1000*1000);
+    //osv_get_all_app_threads(th_id, &app_tids, &app_tids_len);
   }
 
   fprintf(stderr, "TT tst-execve.c main EXIT\n");
