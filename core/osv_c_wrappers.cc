@@ -3,6 +3,7 @@
 #include <osv/debug.hh>
 #include <osv/sched.hh>
 #include <osv/app.hh>
+#include <malloc.h>
 
 using namespace osv;
 using namespace sched;
@@ -26,5 +27,18 @@ int osv_get_all_app_threads(pid_t tid, pid_t** tid_arr, size_t *len) {
     for (auto th : app_threads) {
         (*tid_arr)[(*len)++] = th->id();
     }
+
+#if 1
+    size_t ii;
+    char *str1 = (char*)malloc(1024*4);
+    char *str2 = str1;
+    str2 += snprintf(str2, 1024*4 - (str2-str1), "TTRT APP_ALL_THREADS %d -> [", tid);
+    for (ii=0; ii<*len; ii++) {
+        str2 += snprintf(str2, 1024*4 - (str2-str1), "%d ", (*tid_arr)[ii]);
+    }
+    str2 += snprintf(str2, 1024*4 - (str2-str1), "]\n");
+    fprintf(stderr, "%s", str1);
+    free(str1);
+#endif
     return 0;
 }
