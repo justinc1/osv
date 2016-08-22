@@ -13,7 +13,7 @@ static mutex exec_mutex;
 static condvar cond;
 extern "C" long gettid(); // implemented in linux.cc
 
-#define debugf_execve(...) /* debugf(__VA_ARGS__) */
+#define debugf_execve(...)  debugf(__VA_ARGS__) 
 
 static int thread_run_app_in_namespace(std::string filename,
                                     const std::vector<std::string> args,
