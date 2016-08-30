@@ -33,16 +33,22 @@ namespace pci {
     {
         u32 val = _dev->pci_readl(_pos);
 
+        fprintf(stderr, "TTRT pci::bar::init devID=%x pos=%d val=%x, PCI_BAR_MEMORY_INDICATOR_MASK=%x, PCI_BAR_MMIO=%x\n",
+            _dev->get_device_id(), _pos, val, PCI_BAR_MEMORY_INDICATOR_MASK, PCI_BAR_MMIO);
         _is_mmio = ((val & PCI_BAR_MEMORY_INDICATOR_MASK) == PCI_BAR_MMIO);
         if (_is_mmio) {
             _is_64 = ((val & PCI_BAR_MEM_ADDR_SPACE_MASK)
                 == PCI_BAR_64BIT_ADDRESS);
             _is_prefetchable = ((val & PCI_BAR_PREFETCHABLE_MASK)
                 == PCI_BAR_PREFETCHABLE);
+            fprintf(stderr, "TTRT pci::bar::init devID=%x, _is_64=%d, _is_prefetchable=%d\n",
+                _dev->get_device_id(), _is_64, _is_prefetchable);
         }
         _addr_size = read_bar_size();
 
         val = pci::bar::arch_add_bar(val);
+        fprintf(stderr, "TTRT pci::bar::init devID=%x, val(2) = %p\n",
+            _dev->get_device_id(), val);
 
         if (_is_mmio) {
             _addr_lo = val & PCI_BAR_MEM_ADDR_LO_MASK;
@@ -54,6 +60,8 @@ namespace pci {
         }
 
         _addr_64 = ((u64)_addr_hi << 32) | (u64)(_addr_lo);
+        fprintf(stderr, "TTRT pci::bar::init devID=%x, _addr_lo=0x%08x __addr_hi=0x%08x, __addr_64=%p\n",
+            _dev->get_device_id(), _addr_lo, _addr_hi, _addr_64);
     }
 
     u64 bar::read_bar_size()
