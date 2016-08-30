@@ -114,6 +114,11 @@ bool virtio_driver::parse_pci_config()
         return false;
     }
 
+    // probe_virt_queues() will crash if mmapped bar1 is not mapped
+    if(_bar1->is_mmio() && _bar1->get_mmio() == nullptr) {
+        _bar1->map();
+    }
+
     return true;
 }
 
