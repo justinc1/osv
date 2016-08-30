@@ -162,7 +162,7 @@ namespace pci {
     void bar::writew(u32 offset, u16 val)
     {
         if (_is_mmio) {
-            mmio_setw(_addr_mmio + offset, val);
+            // mmio_setw(_addr_mmio + offset, val); /* what is wrong here with ivshmeme? */
         } else {
             outw(val, _addr_lo + offset);
         }
