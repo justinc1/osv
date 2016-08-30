@@ -87,7 +87,7 @@ enum VIRTIO_CONFIG {
 enum {
     VIRTIO_VENDOR_ID = 0x1af4,
     VIRTIO_PCI_ID_MIN = 0x1000,
-    VIRTIO_PCI_ID_MAX = 0x103f,
+    VIRTIO_PCI_ID_MAX = 0x1110,
 
     VIRTIO_ID_NET     = 1,
     VIRTIO_ID_BLOCK   = 2,
