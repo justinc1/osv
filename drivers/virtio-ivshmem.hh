@@ -32,13 +32,17 @@ public:
 
     static hw_driver* probe(hw_device* dev);
 
+    volatile void* get_data();
+    size_t get_size();
+
 private:
 
     void handle_irq();
     bool ack_irq();
 
     pci_interrupt _irq;
-
+    volatile void* _data;
+    size_t _size;
 };
 
 }
