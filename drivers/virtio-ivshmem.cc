@@ -166,12 +166,35 @@ extern "C" {
 
 //#define PAGE_SIZE 4096ull
 #define PAGE_MASK (PAGE_SIZE-1)
+
+/* internal check */
+static void ivshmem_check() {
+    // ivshmem_mutex already locked
+    if (s_ivshmem == nullptr) {
+        return;
+    }
+
+    // no overlap is allowed
+    for (auto it1=s_segments.begin(); it1!=s_segments.end(); ++it1) {
+        auto data1 = it1->second.data;
+        auto size1 = it1->second.size;
+        for (auto it2=s_segments.begin(); it2!=s_segments.end(); ++it2) {
+            if (it1 == it2)
+                continue;
+            assert(!it2->second.intersect(data1, size1));
+        }
+    }
+
+    // TODO add and check guard pages
+}
+
 /*
 The 'allocator' used is 'get first large enough block'. So nothing to prevent fragmentation.
 Good enoughf for current use.
 */
 int ivshmem_get(size_t size) {
     SCOPE_LOCK(ivshmem_mutex);
+    ivshmem_check();
     debugf_ivshmem("IVSHMEM get size=%d=%p ...\n", size, size);
     size = (size + PAGE_SIZE - 1) & ~PAGE_MASK;
 
@@ -229,6 +252,7 @@ int ivshmem_get(size_t size) {
 
 volatile void* ivshmem_at(int id) {
     SCOPE_LOCK(ivshmem_mutex);
+    ivshmem_check();
     auto it = s_segments.find(id);
     if (it == s_segments.end()) {
         debugf_ivshmem("IVSHMEM at id=%d not found\n", id);
@@ -242,6 +266,7 @@ volatile void* ivshmem_at(int id) {
 
 int ivshmem_dt(volatile void* data) {
     SCOPE_LOCK(ivshmem_mutex);
+    ivshmem_check();
     for (auto it=s_segments.begin(); it!=s_segments.end(); ++it) {
         if(it->second.data == data) {
             it->second.ref_count--;
