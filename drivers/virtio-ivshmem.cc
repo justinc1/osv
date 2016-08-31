@@ -17,6 +17,7 @@ using namespace std;
 
 // sudo ./scripts/run.py -V -n -v --pass-args '--device ivshmem,shm=ivshmem,size=1M' -e '/cli/cli.soXX'
 
+static virtio::ivshmem* s_ivshmem = NULL;
 
 namespace virtio {
 ivshmem::ivshmem(pci::device& pci_dev)
@@ -24,16 +25,21 @@ ivshmem::ivshmem(pci::device& pci_dev)
     , _irq(pci_dev, [&] { return ack_irq(); }, [&] { handle_irq(); })
 {
     add_dev_status(VIRTIO_CONFIG_S_DRIVER_OK);
+    // assume we have only ivshmem device
+    assert(s_ivshmem == nullptr);
+    s_ivshmem = this;
+
+    pci::bar *bar;
+    bar = pci_dev.get_bar(3);
+    bar->map();
+    _data = bar->get_mmio();
+    _size = bar->read_bar_size();
 
 #if 0
     dump_config();
     fprintf(stderr, "ivshmem pci_dev dump_config\n");
     pci_dev.dump_config();
     fprintf(stderr, "ivshmem pci_dev dump_config DONE\n");
-
-    pci::bar *bar;
-    bar = pci_dev.get_bar(3);
-    bar->map();
 
     int ii;
     size_t sz;
@@ -101,6 +107,15 @@ bool ivshmem::ack_irq()
 hw_driver* ivshmem::probe(hw_device* dev)
 {
     return virtio::probe<ivshmem, VIRTIO_IVSHMEM_DEVICE_ID>(dev);
+}
+
+volatile void* ivshmem::get_data()
+{
+    return _data;
+}
+size_t ivshmem::get_size()
+{
+    return _size;
 }
 
 }
