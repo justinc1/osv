@@ -15,8 +15,6 @@
 #include "drivers/virtio.hh"
 #include "drivers/device.hh"
 
-#include <vector>
-
 namespace virtio {
 
 class ivshmem : public virtio_driver {
@@ -45,6 +43,12 @@ private:
     size_t _size;
 };
 
+}
+
+extern "C" {
+int ivshmem_get(size_t size);
+volatile void* ivshmem_at(int id);
+int ivshmem_dt(volatile void* data);
 }
 
 #endif
