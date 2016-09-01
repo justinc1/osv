@@ -21,6 +21,9 @@ using namespace std;
 // sudo ./scripts/run.py -V -n -v --pass-args '--device ivshmem,shm=ivshmem,size=1M' -e '/cli/cli.soXX'
 
 static virtio::ivshmem* s_ivshmem = NULL;
+extern "C" {
+static void intervm_setup();
+}
 
 namespace virtio {
 ivshmem::ivshmem(pci::device& pci_dev)
@@ -93,6 +96,8 @@ ivshmem::ivshmem(pci::device& pci_dev)
     }
     fprintf(stderr, "DBG ivshmem DUMP-string2 '%s'\n", pch+OFFSET);
 #endif
+
+    intervm_setup();
 }
 
 ivshmem::~ivshmem()
@@ -215,12 +220,97 @@ extern "C" {
 
 //#define PAGE_SIZE 4096ull
 #define PAGE_MASK (PAGE_SIZE-1)
+#define GUARD_MAGIC 0xDEADBEEF
+#define GUARD_SIZE 4096ull
+#define GUARD_SIZE_I32 (GUARD_SIZE/sizeof(uint32_t))
+#define INTERVM_SIZE (1024ull*64)
+/*
+Space reserved for inter-vm sinchronization. Should not be used by "end user".
+Should contain mutex to synchronize inter-vm access, and shared map of allocated segments - s_segments.
+
+Layout:
+  GUARD_SIZE
+  INTERVM_SIZE
+  GUARD_SIZE
+  [user-allocated segments]
+*/
+
+typedef struct {
+    uint32_t ivm_guard1[GUARD_SIZE_I32];
+    union {
+        char __dummy_data[INTERVM_SIZE];
+        struct { 
+            ivm_lock lock;
+            char ivm_data[INTERVM_SIZE-sizeof(ivm_lock)];
+        } ivm2;
+    } ivm;
+    uint32_t ivm_guard2[GUARD_SIZE_I32];
+    char shm_data[1];
+} ivshmem_layout;
+
+static ivshmem_layout* get_layout()
+{
+    if(s_ivshmem == nullptr)
+        return nullptr;
+    if(s_ivshmem->get_size() < GUARD_SIZE+INTERVM_SIZE+GUARD_SIZE)
+        return nullptr;
+    ivshmem_layout* layout = (ivshmem_layout*)s_ivshmem->get_data();
+    return layout;
+}
+
+static void intervm_setup() {
+    uint32_t ii;
+    uint32_t *guard;
+
+    /*
+    If lock is needed/used for std::atomic, then this cannot work at all :/
+    So better check.
+    */
+    assert(sizeof(s_my_owner_id) == sizeof(atomic<typeof(s_my_owner_id)>)); 
+    // initialize owner_id
+    srand((unsigned int) osv::clock::wall::now().time_since_epoch().count());
+    for (ii=0; ii<sizeof(s_my_owner_id)/sizeof(char); ii++) {
+        ((char*)(void*)&s_my_owner_id)[ii] = (char)rand();
+    }
+    debugf_ivshmem("IVSHMEM s_my_owner_id=%llu %p\n", s_my_owner_id, s_my_owner_id);
+
+    // part involving write to the actual shared memory region.
+    ivshmem_layout* layout = get_layout();
+    if (layout == nullptr)
+        return;
+    guard = layout->ivm_guard1;
+    for (ii=0; ii<GUARD_SIZE_I32; ii++) {
+        assert(guard[ii] == 0x00000000 || guard[ii] == GUARD_MAGIC);
+        guard[ii] = GUARD_MAGIC;
+    }
+    guard = layout->ivm_guard2;
+    for (ii=0; ii<GUARD_SIZE_I32; ii++) {
+        assert(guard[ii] == 0x00000000 || guard[ii] == GUARD_MAGIC);
+        guard[ii] = GUARD_MAGIC;
+    }
+
+}
 
 /* internal check */
 static void ivshmem_check() {
     // ivshmem_mutex already locked
     if (s_ivshmem == nullptr) {
         return;
+    }
+
+    // Check guard pages
+    uint32_t ii;
+    uint32_t *guard;
+    ivshmem_layout* layout = get_layout();
+    if (layout == nullptr)
+        return;
+    guard = layout->ivm_guard1;
+    for (ii=0; ii<GUARD_SIZE_I32; ii++) {
+        assert(guard[ii] == GUARD_MAGIC);
+    }
+    guard = layout->ivm_guard2;
+    for (ii=0; ii<GUARD_SIZE_I32; ii++) {
+        assert(guard[ii] == GUARD_MAGIC);
     }
 
     // no overlap is allowed
@@ -234,7 +324,6 @@ static void ivshmem_check() {
         }
     }
 
-    // TODO add and check guard pages
 }
 
 /*
