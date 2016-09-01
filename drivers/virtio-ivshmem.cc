@@ -9,6 +9,9 @@
 
 #include <map>
 #include <lockfree/mutex.hh>
+#include <stdint.h>
+#include <stdlib.h>
+#include <atomic>
 
 using namespace std;
 
@@ -158,6 +161,52 @@ bool ivshmem_segment::intersect(volatile void* data0, size_t size0)
         return true;
     }
 }
+
+uint64_t s_my_owner_id = 0;
+
+class ivm_lock {
+public:
+    ivm_lock();
+    ~ivm_lock();
+    void lock();
+    void unlock();
+public:
+    atomic<uint64_t> owner; // inter-vm unique ID. How to get such value? MAC, IP, uuid, random?
+};
+
+ivm_lock::ivm_lock() {
+}
+
+ivm_lock::~ivm_lock() {
+    if (owner != 0 && owner == s_my_owner_id) {
+        debugf_ivshmem("IVSHMEM BUG ivm_lock destructed while lock is held by us!!\n");
+        unlock();
+    }
+}
+
+void ivm_lock::lock() {
+    auto expected = s_my_owner_id*0, desired = s_my_owner_id;
+    int loop_cnt = 0;
+    bool acquired;
+    while(false == (acquired = owner.compare_exchange_weak(expected, desired))) {
+        loop_cnt++;
+        sleep(0);
+    }
+    debugf_ivshmem("IVSHMEM lock owner=%p loop_cnt=%d\n", owner.load(), loop_cnt);
+}
+
+void ivm_lock::unlock() {
+    assert(owner != 0 && owner == s_my_owner_id);
+    auto expected = s_my_owner_id, desired = s_my_owner_id*0;
+    int loop_cnt = 0;
+    bool acquired;
+    while(false == (acquired = owner.compare_exchange_weak(expected, desired))) {
+        loop_cnt++;
+        sleep(0);
+    }
+    debugf_ivshmem("IVSHMEM unlock owner=%p loop_cnt=%d\n", owner.load(), loop_cnt);
+}
+
 
 static std::map<int, ivshmem_segment> s_segments;
 static lockfree::mutex ivshmem_mutex;
