@@ -258,6 +258,22 @@ static ivshmem_layout* get_layout()
     return layout;
 }
 
+static void* get_layout_shm_data()
+{
+    ivshmem_layout* layout = get_layout();
+    if (!layout)
+        return nullptr;
+    return layout->shm_data;
+}
+
+static size_t get_layout_shm_size()
+{
+    ivshmem_layout* layout = get_layout();
+    if (!layout)
+        return 0;
+    return s_ivshmem->get_size() - GUARD_SIZE+INTERVM_SIZE+GUARD_SIZE;
+}
+
 static void intervm_setup() {
     uint32_t ii;
     uint32_t *guard;
@@ -336,17 +352,17 @@ int ivshmem_get(size_t size) {
     debugf_ivshmem("IVSHMEM get size=%d=%p ...\n", size, size);
     size = (size + PAGE_SIZE - 1) & ~PAGE_MASK;
 
-    if (s_ivshmem == nullptr) {
+    if (get_layout_shm_data() == nullptr) {
         errno = ENOMEM;
         return -1;
     }
-    if (size > s_ivshmem->get_size()) {
+    if (size > get_layout_shm_size()) {
         errno = ENOMEM;
         return -1;
     }
 
     // search for free piece of mem
-    volatile void* data = s_ivshmem->get_data(); // Candidate used for first segment
+    volatile void* data = get_layout_shm_data(); // Candidate used for first segment
     for (auto it1=s_segments.begin(); it1!=s_segments.end(); ++it1) {
         auto data1 = it1->second.data;
         auto size1 = it1->second.size;
@@ -360,8 +376,8 @@ int ivshmem_get(size_t size) {
         if (data) {
             // Candidate does not intersect with existing segments.
             // Now check if it is withinn ivshmem (not beyon endd of ivshmem)
-            assert(s_ivshmem->get_data() <= data);
-            if (data+size <= s_ivshmem->get_data()+s_ivshmem->get_size()) {
+            assert(get_layout_shm_data() <= data);
+            if (data+size <= get_layout_shm_data()+get_layout_shm_size()) {
                 // Candidate is OK
                 break;
             }
