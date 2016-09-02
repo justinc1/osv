@@ -226,7 +226,6 @@ void ivm_lock::unlock() {
 
 
 static std::map<int, ivshmem_segment> s_segments;
-static lockfree::mutex ivshmem_mutex;
 
 extern "C" {
 
@@ -354,21 +353,37 @@ static void ivshmem_check() {
 
 }
 
+#define IVM_LOCK_OBJ_LOCK()   { ivshmem_layout* layout = get_layout(); assert(layout != nullptr); layout->ivm.ivm2.lock.lock(); }
+#define IVM_LOCK_OBJ_UNLOCK() { ivshmem_layout* layout = get_layout(); assert(layout != nullptr); layout->ivm.ivm2.lock.unlock(); }
+/*
+Or add local, normal wrapper class to be used with SCOPE_LOCK.
+SCOPE_LOCK cannot be used directly on layout->ivm.ivm2.lock, as it creates a temporal object on stack.
+But ivm_lock has to be at fixed address, and copy detect error via wrong owner_id (ctor does not set it).
+*/
+
 /*
 The 'allocator' used is 'get first large enough block'. So nothing to prevent fragmentation.
 Good enoughf for current use.
 */
 int ivshmem_get(size_t size) {
-    SCOPE_LOCK(ivshmem_mutex);
+    ivshmem_layout* layout = get_layout();
+    if (layout == nullptr) {
+        errno = ENOMEM;
+        return -1;
+    }
+    IVM_LOCK_OBJ_LOCK();
+
     ivshmem_check();
     debugf_ivshmem("IVSHMEM get size=%d=%p ...\n", size, size);
     size = (size + PAGE_SIZE - 1) & ~PAGE_MASK;
 
     if (get_layout_shm_data() == nullptr) {
+        IVM_LOCK_OBJ_UNLOCK();
         errno = ENOMEM;
         return -1;
     }
     if (size > get_layout_shm_size()) {
+        IVM_LOCK_OBJ_UNLOCK();
         errno = ENOMEM;
         return -1;
     }
@@ -397,6 +412,7 @@ int ivshmem_get(size_t size) {
     }
     if (!data) {
         // no free space
+        IVM_LOCK_OBJ_UNLOCK();
         errno = ENOMEM;
         return -1;
     }
@@ -413,25 +429,28 @@ int ivshmem_get(size_t size) {
     iseg.size = size;
     s_segments[id] = iseg;
     debugf_ivshmem("IVSHMEM get id=%d data=%p size=%d=%p\n", id, data, size, size);
+    IVM_LOCK_OBJ_UNLOCK();
     return id;
 }
 
 volatile void* ivshmem_at(int id) {
-    SCOPE_LOCK(ivshmem_mutex);
+    IVM_LOCK_OBJ_LOCK();
     ivshmem_check();
     auto it = s_segments.find(id);
     if (it == s_segments.end()) {
         debugf_ivshmem("IVSHMEM at id=%d not found\n", id);
+        IVM_LOCK_OBJ_UNLOCK();
         errno = EINVAL;
         return (void*) (-1);
     }
     it->second.ref_count++;
     debugf_ivshmem("IVSHMEM at id=%d data=%p size=%d=%p ref_count=%d\n", id, it->second.data, it->second.size, it->second.size, it->second.ref_count);
+    IVM_LOCK_OBJ_UNLOCK();
     return it->second.data;
 }
 
 int ivshmem_dt(volatile void* data) {
-    SCOPE_LOCK(ivshmem_mutex);
+    IVM_LOCK_OBJ_LOCK();
     ivshmem_check();
     for (auto it=s_segments.begin(); it!=s_segments.end(); ++it) {
         if(it->second.data == data) {
@@ -441,10 +460,12 @@ int ivshmem_dt(volatile void* data) {
                 debugf_ivshmem("IVSHMEM dt id=%d removed\n", it->first);
                 s_segments.erase(it);
             }
+            IVM_LOCK_OBJ_UNLOCK();
             return 0;
         }
     }
     // segment not found
+    IVM_LOCK_OBJ_UNLOCK();
     errno = EINVAL;
     return -1;
 }
