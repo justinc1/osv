@@ -13,6 +13,8 @@
 #include <stdlib.h>
 #include <atomic>
 
+extern "C" long gettid();
+
 using namespace std;
 
 #define debugf_ivshmem(...)  { if(0) { debugf(__VA_ARGS__); }}
@@ -167,49 +169,59 @@ bool ivshmem_segment::intersect(volatile void* data0, size_t size0)
     }
 }
 
-uint64_t s_my_owner_id = 0;
-
 class ivm_lock {
 public:
     ivm_lock();
     ~ivm_lock();
     void lock();
     void unlock();
-public:
-    atomic<uint64_t> owner; // inter-vm unique ID. How to get such value? MAC, IP, uuid, random?
-};
 
-ivm_lock::ivm_lock() {
+    static uint64_t s_owner_id_base;
+    static uint64_t owner_id() {
+        return s_owner_id_base + gettid();
+    };
+public:
+    atomic<bool> lock_flag;
+    uint64_t owner; // inter-vm, per-thread unique ID. How to get such value? MAC, IP, uuid, random + thread_id?
+};
+uint64_t ivm_lock::s_owner_id_base = 0;
+
+/*
+With ivm_lock placed in ivshemm memory, the ctor is never really called.
+So initiallizing lock_flag works only when testing.
+Also, if any VM is killed while holding the lock on ivshmem, the lock_flag (and owner id)
+will remain set, and ivshmem has to be manually cleared. Should not be a problem, as we
+can/should remove the pseudo file bofore each run.
+*/
+ivm_lock::ivm_lock()
+    : lock_flag(false) {
 }
 
 ivm_lock::~ivm_lock() {
-    if (owner != 0 && owner == s_my_owner_id) {
+    if (owner != 0 && owner == owner_id()) {
         debugf_ivshmem("IVSHMEM BUG ivm_lock destructed while lock is held by us!!\n");
         unlock();
     }
 }
 
 void ivm_lock::lock() {
-    auto expected = s_my_owner_id*0, desired = s_my_owner_id;
     int loop_cnt = 0;
-    bool acquired;
-    while(false == (acquired = owner.compare_exchange_weak(expected, desired))) {
+    while(std::atomic_exchange_explicit(&lock_flag, true, std::memory_order_acquire)) {
         loop_cnt++;
-        sleep(0);
     }
-    debugf_ivshmem("IVSHMEM lock owner=%p loop_cnt=%d\n", owner.load(), loop_cnt);
+    assert(owner == 0);
+    owner = owner_id();
+    //debugf_ivshmem("IVSHMEM lock owner=%p loop_cnt=%d\n", owner, loop_cnt);
 }
 
 void ivm_lock::unlock() {
-    assert(owner != 0 && owner == s_my_owner_id);
-    auto expected = s_my_owner_id, desired = s_my_owner_id*0;
-    int loop_cnt = 0;
-    bool acquired;
-    while(false == (acquired = owner.compare_exchange_weak(expected, desired))) {
-        loop_cnt++;
-        sleep(0);
+    if (owner != owner_id()) {
+        debugf_ivshmem("IVSHMEM BUG unlock owner=%p != owner_id() =%p\n", owner, owner_id());
     }
-    debugf_ivshmem("IVSHMEM unlock owner=%p loop_cnt=%d\n", owner.load(), loop_cnt);
+    assert(owner != 0 && owner == owner_id());
+    //debugf_ivshmem("IVSHMEM unlock owner=%p\n", owner);
+    owner = 0;
+    std::atomic_store_explicit(&lock_flag, false, std::memory_order_release);
 }
 
 
@@ -282,13 +294,13 @@ static void intervm_setup() {
     If lock is needed/used for std::atomic, then this cannot work at all :/
     So better check.
     */
-    assert(sizeof(s_my_owner_id) == sizeof(atomic<typeof(s_my_owner_id)>)); 
-    // initialize owner_id
+    assert(sizeof(ivm_lock::lock_flag) == sizeof(atomic<bool>)); 
+    // Initialize owner_id.
     srand((unsigned int) osv::clock::wall::now().time_since_epoch().count());
-    for (ii=0; ii<sizeof(s_my_owner_id)/sizeof(char); ii++) {
-        ((char*)(void*)&s_my_owner_id)[ii] = (char)rand();
+    for (ii=0; ii<sizeof(ivm_lock::s_owner_id_base)/sizeof(char); ii++) {
+        ((char*)(void*)&ivm_lock::s_owner_id_base)[ii] = (char)rand();
     }
-    debugf_ivshmem("IVSHMEM s_my_owner_id=%llu %p\n", s_my_owner_id, s_my_owner_id);
+    debugf_ivshmem("IVSHMEM ivm_lock::s_owner_id_base=%llu %p\n", ivm_lock::s_owner_id_base, ivm_lock::s_owner_id_base);
 
     // part involving write to the actual shared memory region.
     ivshmem_layout* layout = get_layout();
