@@ -703,15 +703,20 @@ class osv_syms(gdb.Command):
                              gdb.COMMAND_USER, gdb.COMPLETE_NONE)
     def invoke(self, arg, from_tty):
         syminfo_resolver.clear_cache()
+        objmap = open('object-map.txt', 'w')
+        # objmap.write("baseaddr\tosv_path\thost_path\n")
+        objmap.write("%s\t%s\t%s\n" % (hex(0), "loader.elf", os.path.abspath(os.path.curdir)+'/build/debug.x64/loader.elf'))
         for obj in read_vector(gdb.lookup_global_symbol('elf::program::s_objs').value()):
             base = to_int(obj['_base'])
             obj_path = obj['_pathname']['_M_dataplus']['_M_p'].string()
             path = translate(obj_path)
+            objmap.write("%s\t%s\t%s\n" % (hex(base), obj_path, path))
             if not path:
                 print('ERROR: Unable to locate object file for:', obj_path, hex(base))
             else:
                 print(path, hex(base))
                 load_elf(path, base)
+        objmap.close()
 
 class osv_load_elf(gdb.Command):
     def __init__(self):
