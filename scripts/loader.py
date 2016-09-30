@@ -35,6 +35,7 @@ xmodules.append(os.path.join(osv_dir, '../mike-apps/' + ompi_dir + '/ompi-releas
 xmodules.append(os.path.join(osv_dir, '../mike-apps/' + ompi_dir + '/ompi-release/build-osv-symbols/ompi/contrib/vt/vt/tools/vtunify/.libs'))
 xmodules.append(os.path.join(osv_dir, '../mike-apps/' + ompi_dir + '/ompi-release/build-osv-symbols/ompi/contrib/vt/vt/extlib/otf/otflib/.libs'))
 xmodules.append(os.path.join(osv_dir, '../mike-apps/' + openfoam_dir + '/ROOTFS/usr/lib/'))
+xmodules.append(os.path.join(osv_dir, 'apps/prf-test1/'))
 
 sys.path.append(os.path.join(osv_dir, 'scripts'))
 

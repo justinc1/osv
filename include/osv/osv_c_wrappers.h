@@ -22,6 +22,9 @@ Returns 0 on success, error code on error.
 */
 int osv_get_all_app_threads(pid_t tid, pid_t** tid_arr, size_t* len);
 
+int trace_getcpu();
+int trace_gettid();
+
 #ifdef __cplusplus
 }
 #endif

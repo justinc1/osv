@@ -28,3 +28,12 @@ int osv_get_all_app_threads(pid_t tid, pid_t** tid_arr, size_t *len) {
     }
     return 0;
 }
+
+int trace_getcpu() {
+    return sched::cpu::current()->id;
+}
+
+//int gettid();
+int trace_gettid() {
+    return sched::thread::current()->id(); // == gettid();
+}
