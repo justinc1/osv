@@ -139,7 +139,7 @@ void sockbuf_iolock::unlock(mutex& mtx)
 }
 
 template<typename Clock>
-int sbwait_tmo(socket* so, struct sockbuf *sb, boost::optional<std::chrono::time_point<Clock>> timeout)
+int sbwait_tmo(socket* so, struct sockbuf *sb, boost::optional<std::chrono::time_point<Clock>> timeout) /**/
 {
 	SOCK_LOCK_ASSERT(so);
 
@@ -155,7 +155,7 @@ int sbwait_tmo(socket* so, struct sockbuf *sb, boost::optional<std::chrono::time
 		so->so_nc_busy = false;
 		so->so_nc_wq.wake_all(SOCK_MTX_REF(so));
 	} else {
-		sched::thread::wait_for(SOCK_MTX_REF(so), so->so_nc_wq, sb->sb_cc_wq, tmr, sc);
+		sched::thread::wait_for(SOCK_MTX_REF(so), so->so_nc_wq, sb->sb_cc_wq, tmr, sc); /* kaj so vsi tejle waiterji?? */
 	}
 	if (sc.interrupted()) {
 		return EINTR;
@@ -185,7 +185,7 @@ static inline boost::optional<std::chrono::time_point<Clock>> parse_timeout(int 
  * Wait for data to arrive at/drain from a socket buffer.
  */
 int
-sbwait(socket* so, struct sockbuf *sb)
+sbwait(socket* so, struct sockbuf *sb) /**/
 {
 	return sbwait_tmo(so, sb, parse_timeout<osv::clock::uptime>(sb->sb_timeo));
 }

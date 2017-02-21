@@ -125,7 +125,7 @@ fputsock(struct socket *so)
  * Copy the bsd_osockaddr structure pointed to by osa to kernel, adjust
  * family and convert to bsd_sockaddr.
  */
-static int
+/*static*/ int
 linux_getsockaddr(struct bsd_sockaddr **sap, const struct bsd_osockaddr *osa, int salen)
 {
 	struct bsd_sockaddr *sa;
@@ -590,7 +590,7 @@ linux_sendto_hdrincl(int s, void *buf, int len, int flags, void *to,
 }
 
 int
-linux_socket(int domain, int type, int protocol, int *out_fd)
+linux_socket(int domain, int type, int protocol, int *out_fd) /**/
 {
 	int retval_socket, socket_flags;
 	int s;
@@ -605,7 +605,7 @@ linux_socket(int domain, int type, int protocol, int *out_fd)
 	if (domain == -1)
 		return (EAFNOSUPPORT);
 
-	retval_socket = sys_socket(domain, type, protocol, &s);
+	retval_socket = sys_socket(domain, type, protocol, &s); /**/
 	if (retval_socket)
 		return (retval_socket);
 

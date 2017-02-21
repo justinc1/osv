@@ -136,7 +136,7 @@ struct hash<epoll_ptr> : private hash<epoll_file*>, private hash<epoll_key> {
 /*
  * File structure
  */
-struct file {
+struct file { /**/
 	using clock = osv::clock::uptime;
 	using timeout_t = boost::optional<clock::time_point>;
 

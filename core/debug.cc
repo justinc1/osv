@@ -19,6 +19,18 @@
 
 using namespace std;
 
+const char* dbg_short_file(const char* path) {
+    const char* p1=path;
+    const char* p2=path;
+    while(*p1 != '\0') {
+        if(*p1 == '/') {
+            p2=p1+1;
+        }
+        p1++;
+    }
+    return p2;
+}
+
 logger* logger::_instance = nullptr;
 char debug_buffer[DEBUG_BUFFER_SIZE];
 int debug_buffer_idx = 0;
@@ -35,6 +47,25 @@ logger::~logger()
 
 }
 
+void fprintf_pos_fun(FILE* ff, const char* file, int line, const char* fun, const char* fmt, ...) {
+    return;
+    va_list argptr;
+    va_start(argptr, fmt);
+    //vsnprintf(msg, 512, fmt, argptr);
+    //fprintf(ff, "DBG tid=% 5d %s:%d %s ",  gettid(), dbg_short_file(file), line, fun, argptr );
+    fprintf(ff, "DBG tid=% 5d %s:%d %s ",  gettid(), dbg_short_file(file), line, fun );
+    fprintf(ff, fmt, argptr );
+    va_end(argptr);
+
+    /*
+    void debugf(const char *fmt, ...)
+        va_list argptr;
+        va_start(argptr, fmt);
+        vsnprintf(msg, 512, fmt, argptr);
+        va_end(argptr);
+    */
+}
+
 bool logger::parse_configuration(void)
 {
     // FIXME: read configuration from a file
@@ -46,6 +77,8 @@ bool logger::parse_configuration(void)
     add_tag("poll", logger_info);
     add_tag("dhcp", logger_info);
     add_tag("acpi", logger_error);
+
+    //add_tag("socket-api", logger_debug);
 
     return (true);
 }

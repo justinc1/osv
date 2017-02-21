@@ -34,7 +34,7 @@ void read(fileref f, void *buffer, uint64_t offset, uint64_t len)
     assert(data.uio_resid == 0);
 }
 
-void write(fileref f, const void* buffer, uint64_t offset, uint64_t len)
+void write(fileref f, const void* buffer, uint64_t offset, uint64_t len) /**/
 {
     iovec iov{const_cast<void*>(buffer), len};
     // FIXME: breaks on 32-bit

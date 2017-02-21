@@ -159,7 +159,7 @@ int fget(int fd, struct file **out_fp)
     return 0;
 }
 
-file::file(unsigned flags, filetype_t type, void *opaque)
+file::file(unsigned flags, filetype_t type, void *opaque) /**/
     : f_flags(flags)
     , f_count(1)
     , f_data(opaque)

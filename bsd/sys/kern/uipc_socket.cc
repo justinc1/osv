@@ -128,6 +128,7 @@
 
 #include <osv/zcopy.hh>
 
+#include <osv/debug.hh>
 #define uipc_d(...) tprintf_d("uipc_socket", __VA_ARGS__)
 
 static int	soreceive_rcvoob(struct socket *so, struct uio *uio,
@@ -250,6 +251,7 @@ soalloc(struct vnet *vnet)
 	so->so_gencnt = ++so_gencnt;
 	++numopensockets;
 	mtx_unlock(&so_global_mtx);
+	fprintf_pos(stderr, "created socket so=%p\n", so);
 	return (so);
 }
 
@@ -265,6 +267,7 @@ sodealloc(struct socket *so)
 	KASSERT(so->so_count == 0, ("sodealloc(): so_count %d", so->so_count));
 	KASSERT(so->so_pcb == NULL, ("sodealloc(): so_pcb != NULL"));
 
+	fprintf_pos(stderr, "deleted socket so=%p\n", so);
 	mtx_lock(&so_global_mtx);
 	so->so_gencnt = ++so_gencnt;
 	--numopensockets;	/* Could be below, but faster here. */
@@ -312,7 +315,7 @@ socreate(int dom, struct socket **aso, int type, int proto,
 
 	if (prp->pr_type != type)
 		return (EPROTOTYPE);
-	so = soalloc(CRED_TO_VNET(cred));
+	so = soalloc(CRED_TO_VNET(cred)); /**/
 	if (so == NULL)
 		return (ENOBUFS);
 
@@ -746,6 +749,7 @@ soconnect(struct socket *so, struct bsd_sockaddr *nam, struct thread *td)
 		 * biting us.
 		 */
 		so->so_error = 0;
+		fprintf_pos(stderr, "so=%p so->so_proto->pr_usrreqs->pru_connect=%p\n", so, so->so_proto->pr_usrreqs->pru_connect);
 		error = (*so->so_proto->pr_usrreqs->pru_connect)(so, nam, td);
 	}
 	CURVNET_RESTORE();
@@ -788,6 +792,7 @@ sosend_dgram(struct socket *so, struct bsd_sockaddr *addr, struct uio *uio,
 	ssize_t resid;
 	int clen = 0, error, dontroute;
 
+	//fprintf_pos(stderr, " so=%p\n", so);
 	KASSERT(so->so_type == SOCK_DGRAM, ("sodgram_send: !SOCK_DGRAM"));
 	KASSERT(so->so_proto->pr_flags & PR_ATOMIC,
 	    ("sodgram_send: !PR_ATOMIC"));
@@ -900,6 +905,9 @@ sosend_dgram(struct socket *so, struct bsd_sockaddr *addr, struct uio *uio,
 	 * rethink this.
 	 */
 	VNET_SO_ASSERT(so);
+	// UDP sendto from udpsend.c (udpping.d) has (*so->so_proto->pr_usrreqs->pru_send) ==
+	// == udp_send() bsd/sys/netinet/udp_usrreq.cc, line 1515.
+	//fprintf_pos(stderr, " so=%p pru_send()=%p\n", so, *so->so_proto->pr_usrreqs->pru_send);
 	error = (*so->so_proto->pr_usrreqs->pru_send)(so,
 	    (flags & MSG_OOB) ? PRUS_OOB :
 	/*
@@ -1375,7 +1383,7 @@ sockbuf_pushsync(socket* so, struct sockbuf *sb, struct mbuf *nextrecord)
  * the count in uio_resid.
  */
 int
-soreceive_generic(struct socket *so, struct bsd_sockaddr **psa, struct uio *uio,
+soreceive_generic(struct socket *so, struct bsd_sockaddr **psa, struct uio *uio, /**/
     struct mbuf **mp0, struct mbuf **controlp, int *flagsp)
 {
 	struct mbuf *m, **mp;
@@ -2421,7 +2429,7 @@ soreceive_dgram(struct socket *so, struct bsd_sockaddr **psa, struct uio *uio,
 		}
 		SBLASTRECORDCHK(&so->so_rcv);
 		SBLASTMBUFCHK(&so->so_rcv);
-		error = sbwait(so, &so->so_rcv);
+		error = sbwait(so, &so->so_rcv); /**/
 		if (error) {
 			SOCK_UNLOCK(so);
 			return (error);
@@ -2536,12 +2544,20 @@ soreceive_dgram(struct socket *so, struct bsd_sockaddr **psa, struct uio *uio,
 }
 
 int
-soreceive(struct socket *so, struct bsd_sockaddr **psa, struct uio *uio,
+soreceive(struct socket *so, struct bsd_sockaddr **psa, struct uio *uio, /**/
     struct mbuf **mp0, struct mbuf **controlp, int *flagsp)
 {
 	int error;
 
+	/*
+	A tak kak OWNER flag nastavi ??  V zvezi z:
+	Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
+	ne, to je noop macro.
+	*/
 	CURVNET_SET(so->so_vnet);
+	/*
+	so->so_proto->pr_usrreqs->pru_soreceive == soreceive_dgram, za UDP+recvfrom
+	*/
 	error = (so->so_proto->pr_usrreqs->pru_soreceive(so, psa, uio, mp0,
 	    controlp, flagsp));
 	CURVNET_RESTORE();

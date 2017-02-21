@@ -63,6 +63,8 @@
 #include <osv/zcopy.hh>
 #include <sys/eventfd.h>
 
+#include <osv/debug.hh>
+
 using namespace std;
 
 /* FIXME: OSv - implement... */
@@ -91,7 +93,7 @@ SYSCTL_INT(_kern_ipc, OID_AUTO, nsfbufsused, CTLFLAG_RD, &nsfbufsused, 0,
  * Convert a user file descriptor to a kernel file entry.
  * A reference on the file entry is held upon returning.
  */
-static int
+/*static*/ int
 getsock_cap(int fd, struct file **fpp, u_int *fflagp)
 {
     struct file *fp;
@@ -115,7 +117,7 @@ getsock_cap(int fd, struct file **fpp, u_int *fflagp)
 socketref socreate(int dom, int type, int proto)
 {
 	socket* so;
-	int error = socreate(dom, &so, type, proto, nullptr, nullptr);
+	int error = socreate(dom, &so, type, proto, nullptr, nullptr); /**/
 	if (error) {
 		throw error;
 	}
@@ -130,10 +132,11 @@ int
 sys_socket(int domain, int type, int protocol, int *out_fd)
 {
 	try {
-		auto so = socreate(domain, type, protocol);
+		auto so = socreate(domain, type, protocol); /**/
 		fileref fp = make_file<socket_file>(FREAD | FWRITE, move(so));
 		fdesc fd(fp);
 		*out_fd = fd.release();
+		fprintf_pos(stderr, "created socket fd=%d\n", *out_fd);
 		return 0;
 	} catch (int error) {
 		return error;
@@ -600,7 +603,7 @@ kern_recvit(int s, struct msghdr *mp, struct mbuf **controlp, ssize_t* bytes)
 		}
 	}
 	len = auio.uio_resid;
-	error = soreceive(so, &fromsa, &auio, (struct mbuf **)0,
+	error = soreceive(so, &fromsa, &auio, (struct mbuf **)0,  /**/
 	    (mp->msg_control || controlp) ? &control : (struct mbuf **)0,
 	    &mp->msg_flags);
 	if (error) {
@@ -666,7 +669,7 @@ recvit(int s, struct msghdr *mp, void *namelenp, ssize_t* bytes)
 {
 	int error;
 
-	error = kern_recvit(s, mp, NULL, bytes);
+	error = kern_recvit(s, mp, NULL, bytes); /**/
 	if (error)
 		return (error);
 	if (namelenp) {
@@ -700,7 +703,7 @@ sys_recvfrom(int s, caddr_t buf, size_t  len, int flags,
 	aiov.iov_len = len;
 	msg.msg_control = 0;
 	msg.msg_flags = flags;
-	error = recvit(s, &msg, fromlenaddr, bytes);
+	error = recvit(s, &msg, fromlenaddr, bytes); /**/
 done2:
 	return(error);
 }

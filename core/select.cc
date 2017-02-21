@@ -16,6 +16,14 @@
 
 #define select_d(...)  tprintf_d("select", __VA_ARGS__)
 
+/*------------------------------------------------------------------------*/
+class sock_info;
+sock_info* sol_find(int fd);
+size_t soi_data_len(int fd);
+bool soi_is_bypassed(sock_info* soinf);
+
+/*------------------------------------------------------------------------*/
+
 /* Basic select() implementation on top of poll() */
 int select (int nfds,
             fd_set * readfds,
@@ -31,6 +39,29 @@ int select (int nfds,
 
     select_d("select(nfds=%d, readfds=0x%lx, writefds=0x%lx, exceptfds=0x%lx, timeout=0x%lx)",
         nfds, readfds, writefds, exceptfds, timeout);
+
+    int fd;
+    size_t data_len;
+    sock_info *soinf;
+    for (fd=0; fd<nfds; fd++) {
+        // recimo,da rabim samo read :/
+        soinf = sol_find(fd);
+        if (!soinf)
+            continue;
+        // OK, fd is socket
+        if (!soi_is_bypassed(soinf))
+            continue;
+        // OK, fd is bypasssed socket
+
+        if (FD_ISSET(fd, readfds)) {
+            // We are trying to read/write to bypassed socket
+            
+            // prava implementacij mora odstranit fd iz readfds...
+            data_len = soi_data_len(fd);
+            if (data_len)
+                return 1;
+        }
+    }
 
     if ((nfds < 0) || (nfds > FD_SETSIZE)) {
         select_d("select() failed 1");

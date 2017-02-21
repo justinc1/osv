@@ -52,7 +52,7 @@ enum	uio_rw { UIO_READ, UIO_WRITE };
 
 #define UIO_SYSSPACE 0
 
-struct uio {
+struct uio { /**/
 	struct iovec *uio_iov;		/* scatter/gather list */
 	int	uio_iovcnt;		/* length of scatter/gather list */
 	off_t	uio_offset;		/* offset in target object */

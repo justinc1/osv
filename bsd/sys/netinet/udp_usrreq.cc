@@ -1507,7 +1507,7 @@ udp_disconnect(struct socket *so)
 }
 
 static int
-udp_send(struct socket *so, int flags, struct mbuf *m, struct bsd_sockaddr *addr,
+udp_send(struct socket *so, int flags, struct mbuf *m, struct bsd_sockaddr *addr, /**/
     struct mbuf *control, struct thread *td)
 {
 	struct inpcb *inp;
