@@ -16,6 +16,9 @@
 #include <boost/circular_buffer.hpp>
 #include <arpa/inet.h>  /* for sockaddr_in and inet_ntoa() */
 
+//#undef fprintf_pos
+//#define fprintf_pos(...) /**/
+
 bool in_range(size_t val, size_t low, size_t high)
 {
 	if (high>low) {
@@ -26,14 +29,30 @@ bool in_range(size_t val, size_t low, size_t high)
 	}
 }
 
+class RingMessageHdr {
+public:
+	size_t length;
+	// char data[1]; // variable length array
+};
+
+class RingMessage : RingMessageHdr {
+public:
+	char data[1]; // variable length array
+public:
+	char* to_buffer() {return data;}
+};
+
 class RingBuffer {
 public:
 	RingBuffer();
 	void alloc(size_t len);
 	size_t push(const void* buf, size_t len);
 	size_t pop(void* buf, size_t len);
+public:
 	size_t available_read();
 	size_t available_write();
+	size_t push_part(const void* buf, size_t len);
+	size_t pop_part(void* buf, size_t len);
 public:
 	char* data;
 	size_t length;
@@ -58,7 +77,8 @@ void RingBuffer::alloc(size_t len)
 	data = (char*)malloc(len);
 	if (!data)
 		return;
-	memset(data, 0x00, len);
+	fprintf(stderr, "RingBuffer::alloc data=%p len=%d\n", data, len);
+	memset(data, 0x11, len);
 	length = len;
 	rpos = 0;
 	wpos = 0;
@@ -78,10 +98,16 @@ size_t RingBuffer::available_write() {
 	return length - available_read();
 }
 
-size_t RingBuffer::push(const void* buf, size_t len)
+// TODO push messages one-by-one
+// limit max size - 2 kB
+size_t RingBuffer::push_part(const void* buf, size_t len)
 {
 	size_t wpos2, len1, len2;
-	len = len % length; // so at most one wrap-around will occur.
+	assert(len <= available_write());
+	if (len + sizeof(RingMessageHdr) > available_write()) {
+		// drop packet
+		return 0;
+	}
 	wpos2 = wpos + len;
 	if (wpos2 <= length) {
 		memcpy(data + wpos, buf, len);
@@ -96,26 +122,64 @@ size_t RingBuffer::push(const void* buf, size_t len)
 	}
 	return len;
 }
+size_t RingBuffer::push(const void* buf, size_t len)
+{
+	RingMessageHdr hdr;
+	while (sizeof(hdr) + len > available_write()) {
+		// drop packet
+		//return 0;
+		fprintf(stderr, "RingBuffer::push delay\n");
+		usleep(1);
+	}
+	hdr.length = len;
+	//fprintf(stderr, "RingBuffer::push-ing len=%d , rpos=%d, wpos=%d\n", len, rpos, wpos);
+	push_part(&hdr, sizeof(hdr));
+	push_part(buf, len);
+	//fprintf(stderr, "RingBuffer::push-ed  len=%d , rpos=%d, wpos=%d\n", len, rpos, wpos);
+	return len;
+}
 
-size_t RingBuffer::pop(void* buf, size_t len)
+size_t RingBuffer::pop_part(void* buf, size_t len)
 {
 	size_t rpos2, len1, len2;
-	size_t readable_len = available_read();
-	len = std::min(len, length); // so at most one wrap-around will occur.
-	len = std::min(len, readable_len);
+	assert(len <= available_read());
+	assert(len <= length);
+	//size_t readable_len = available_read();
 	rpos2 = rpos + len;
 	if (rpos2 <= length) {
-		memcpy(data + rpos, buf, len);
+		memcpy(buf, data + rpos, len);
 		rpos = rpos2;
 	}
 	else {
 		len1 = length - rpos;
 		len2 = len - len1;
-		memcpy(data + rpos, buf, len1);
-		memcpy(data, buf + len1, len2);
+		memcpy(buf, data + rpos, len1);
+		memcpy(buf + len1, data, len2);
 		rpos = len2;
 	}
 	return len;
+}
+
+size_t RingBuffer::pop(void* buf, size_t len)
+{
+	RingMessageHdr hdr;
+	size_t readable_len = available_read();
+	/* if (sizeof(hdr) + 0 > readable_len) {
+		// no packet
+		return 0;
+	} */
+	//fprintf(stderr, "RingBuffer::pop\n");
+	while (sizeof(hdr) + 1 > available_read()) {
+		fprintf(stderr, "RingBuffer::pop delay\n");
+		usleep(1);
+	}
+	//fprintf(stderr, "RingBuffer::pop-ing len=%d , rpos=%d, wpos=%d\n", len, rpos, wpos);
+	pop_part(&hdr, sizeof(hdr));
+	assert(sizeof(hdr) + hdr.length <= readable_len);
+	len = pop_part(buf, hdr.length);
+	assert(len == hdr.length);
+	//fprintf(stderr, "RingBuffer::pop-ed  len=%d , rpos=%d, wpos=%d\n", len, rpos, wpos);
+	return hdr.length;
 }
 
 /*--------------------------------------------------------------------------*/
@@ -123,7 +187,7 @@ size_t RingBuffer::pop(void* buf, size_t len)
 class sock_info {
 public:
 	sock_info();
-	void bypass(uint32_t peer_addr=0xFFFFFFFF, ushort peer_port=0);
+	void bypass(uint32_t peer_addr=0xFFFFFFFF, ushort peer_port=0, int peer_fd=-1);
 	size_t data_push(const void* buf, size_t len);
 	size_t data_pop(void* buf, size_t len);
 public:
@@ -146,6 +210,7 @@ public:
 	// peer this socket is connected to. Note - our peer can be connected by/from multiple clients.
 	uint32_t peer_addr;
 	ushort peer_port;
+	int peer_fd; // ker je iskanje prevec fff
 };
 
 sock_info::sock_info() {
@@ -156,21 +221,23 @@ sock_info::sock_info() {
 	my_port = 0;
 	peer_addr = 0xFFFFFFFF;
 	peer_port = 0;
+	peer_fd = -1;
 }
 
-#define BYPASS_BUF_SZ (1024*1024)
+#define BYPASS_BUF_SZ (1024*1024*300)
 
-void sock_info::bypass(uint32_t _peer_addr, ushort _peer_port) {
+void sock_info::bypass(uint32_t _peer_addr, ushort _peer_port, int _peer_fd) {
 	if (!is_bypass) {
 		is_bypass = true;
 		peer_addr = _peer_addr;
 		peer_port = _peer_port;
+		peer_fd = _peer_fd;
 		//in_buf.set_capacity(BYPASS_BUF_SZ); // WTF - 16 je premajhna stevilka, in crashne ????? 16kB je OK.
 		ring_buf.alloc(BYPASS_BUF_SZ);
 		//fprintf_pos(stderr, "INFO fd=%d, in_buf size=%d capacity=%d reserve=%d\n",
 		//	fd, in_buf.size(), in_buf.capacity(), in_buf.reserve() );
-		fprintf_pos(stderr, "INFO fd=%d peer addr=0x%08x,port=%d\n",
-			fd, ntohl(peer_addr), ntohs(peer_port));
+		fprintf_pos(stderr, "INFO fd=%d peer fd=%d,addr=0x%08x,port=%d\n",
+			fd, peer_fd, ntohl(peer_addr), ntohs(peer_port));
 	}
 }
 
@@ -223,7 +290,7 @@ sock_info* sol_find(int fd) {
 	auto it = std::find_if(so_list.begin(), so_list.end(), 
 		[&] (sock_info soinf) { return soinf.fd == fd; } );
 	if (it == so_list.end()) {
-		if(fd>2) {
+		if(fd>5) {
 			fprintf_pos(stderr, "ERROR fd=%d not found\n", fd);
 		}
 		return nullptr;
@@ -263,7 +330,9 @@ sock_info* sol_find_peer2(int fd, uint32_t peer_addr, ushort peer_port) {
 	return &(*it);
 }
 bool so_bypass_possible(sock_info* soinf, ushort port) {
-	return false;
+	
+	//return false;
+	
 	bool do_bypass=false;
 	// instead of searching for intra-host VMs, use bypass for magic port numbers only
 	// iperf - port 5001
@@ -493,6 +562,7 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		// soinf->bypass(peer_addr, peer_port);
 		soinf->peer_addr = peer_addr;
 		soinf->peer_port = peer_port;
+		// soinf->peer_fd bo pa recvfrom nastavil
 	}
 	else {
 		fprintf_pos(stderr, "INFO connect fd=%d me=0x%08x:%d peer 0x%08x:%d bypass not possible\n", 
@@ -585,7 +655,7 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 	if (soinf==NULL || !soinf->is_bypass) {
 		return 0;
 	}
-	fprintf_pos(stderr, "BYPASS-ed\n", "");
+	fprintf_pos(stderr, "fd=%d BYPASS-ed\n", fd);
 
 	/* bsd/sys/kern/uipc_syscalls.cc:608 +- eps */
 	int error;
@@ -641,7 +711,7 @@ ssize_t recvfrom(int fd, void *__restrict buf, size_t len, int flags,
 	struct sockaddr_in* in_addr = (sockaddr_in*)(void*)addr;
 	uint32_t peer_addr = in_addr->sin_addr.s_addr;
 	ushort peer_port = in_addr->sin_port;
-	fprintf_pos(stderr, "INFO fd=%d peer addr=0x%08x,port=%d\n", fd, ntohl(peer_addr), ntohs(peer_port));
+	fprintf_pos(stderr, "INFO fd=%d me 0x%08x:%d, peer 0x%08x:%d\n", fd, ntohl(soinf->my_addr), ntohs(soinf->my_port), ntohl(peer_addr), ntohs(peer_port));
 	//
 	// and enable for peer too.
 	// But peer didn't save its port and addr :/
@@ -649,17 +719,22 @@ ssize_t recvfrom(int fd, void *__restrict buf, size_t len, int flags,
  	sock_info *peer_soinf = nullptr;
  	//peer_soinf = sol_find_peer2(fd, peer_addr, peer_port);
  	peer_soinf = sol_find_peer2(fd, soinf->my_addr, soinf->my_port); // search for socket, which is sending to me.
+	fprintf_pos(stderr, "INFO fd=%d peer_soinf=%p %d_0x%08x:%d \n", fd, peer_soinf, peer_soinf->fd, ntohl(peer_addr), ntohs(peer_port));
 
  	//
 	if(!peer_soinf) {
 		return bytes; //TODO_tole?
 	}
-	if (so_bypass_possible(soinf, soinf->my_port) ||
-		so_bypass_possible(soinf, peer_port)) {
+	bool bypass_possible_me, bypass_possible_peer; 
+	bypass_possible_me = so_bypass_possible(nullptr, soinf->my_port);
+	bypass_possible_peer = so_bypass_possible(nullptr, peer_port);
+	fprintf_pos(stderr, "INFO fd=%d bypass_possible me %d, peer %d\n", fd, bypass_possible_me, bypass_possible_peer);
+	if (bypass_possible_me || bypass_possible_peer) {
 		fprintf_pos(stderr, "INFO fd=%d me=0x%08x:%d peer 0x%08x:%d try to bypass\n", 
 			fd, ntohl(soinf->my_addr), ntohs(soinf->my_port), ntohl(peer_addr), ntohs(peer_port));
-		soinf->bypass(peer_addr, peer_port);
-		peer_soinf->bypass(peer_addr, peer_port);
+		soinf->bypass(peer_addr, peer_port, peer_soinf->fd);
+		//peer_soinf->bypass(peer_addr, peer_port);
+		peer_soinf->bypass(0x00000000, soinf->my_port, fd); // ANY addr, ali pa -1, ali pa kar peer_addr, saj je enak - ista VM
 	}
 	else {
 		fprintf_pos(stderr, "INFO fd=%d me=0x%08x:%d peer 0x%08x:%d bypass not possible\n", 
@@ -748,12 +823,16 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	}
 	// OK, peer seems to be known and our.
 
-	fprintf_pos(stderr, "BYPASS-ed\n", "");
-	fprintf_pos(stderr, "peer_addr=0x%08x peer_port=%d\n", ntohl(peer_addr), ntohs(peer_port));
+	fprintf_pos(stderr, "fd=%d BYPASS-ed\n", fd);
+	fprintf_pos(stderr, "fd=%d peer_addr=0x%08x peer_port=%d\n", fd, ntohl(peer_addr), ntohs(peer_port));
 	// zdaj pa najdi enga, ki temu ustreza
 	// CEL JEBENI ROUTING BI MORAL EVALUIRATI !!!!! fuck.
 	// Pa - a naj gledam IP addr ali MAC addr ?
- 	sock_info *soinf_peer = sol_find_me(fd, peer_addr, peer_port);
+ 	
+ 	//sock_info *soinf_peer = sol_find_me(fd, peer_addr, peer_port);
+ 	sock_info *soinf_peer = sol_find(soinf->peer_fd);
+ 	assert(soinf_peer->peer_fd == fd);
+
 		size_t len2=0;
  	if (soinf_peer) {
 			len2 = soinf_peer->data_push(buf, len);
@@ -826,7 +905,7 @@ ssize_t sendto(int fd, const void *buf, size_t len, int flags,
 	ssize_t bytes;
 
 	sock_d("sendto(fd=%d, buf=..., len=%d, flags=0x%x, ...", fd, len, flags);
-	fprintf_pos(stderr, "INFO sendto fd=%d\n", fd);
+	fprintf_pos(stderr, "INFO sendto fd=%d len=%d\n", fd, len);
 
 	ssize_t len2 = sendto_bypass(fd, buf, len, flags, addr, alen);
 	if (len2) {
@@ -855,6 +934,11 @@ ssize_t sendto(int fd, const void *buf, size_t len, int flags,
 	uint32_t peer_addr = in_addr->sin_addr.s_addr;
 	ushort peer_port = in_addr->sin_port;
 	fprintf_pos(stderr, "INFO fd=%d peer addr=0x%08x,port=%d\n", fd, ntohl(peer_addr), ntohs(peer_port));
+
+	// soft of implicit connect - like we will always sendto to same peer.
+	soinf->peer_addr = peer_addr;
+	soinf->peer_port = peer_port;
+	/*
 	if (so_bypass_possible(soinf, soinf->my_port) ||
 		so_bypass_possible(soinf, peer_port)) {
 		fprintf_pos(stderr, "INFO fd=%d me=0x%08x:%d peer 0x%08x:%d try to bypass\n", 
@@ -866,7 +950,7 @@ ssize_t sendto(int fd, const void *buf, size_t len, int flags,
 	else {
 		fprintf_pos(stderr, "INFO fd=%d me=0x%08x:%d peer 0x%08x:%d bypass not possible\n", 
 			fd, ntohl(soinf->my_addr), ntohs(soinf->my_port), ntohl(peer_addr), ntohs(peer_port));
-	}
+	}*/
 	//soinf->bypass();
 
 

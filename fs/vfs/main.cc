@@ -376,7 +376,7 @@ ssize_t read(int fd, void *buf, size_t count)
 {
     sock_info* soinf = sol_find(fd);
     if(fd>2) {
-        fprintf_pos(stderr, "INFO read fd=%d\n", fd);
+        //fprintf_pos(stderr, "INFO read fd=%d\n", fd);
     }
     if (soinf) {
         return recvfrom_bypass(fd, buf, count);
@@ -423,7 +423,7 @@ ssize_t write(int fd, const void *buf, size_t count) /**/
 {
     int ret;
     if(fd>2) {
-        fprintf_pos(stderr, "INFO write fd=%d\n", fd);
+        //fprintf_pos(stderr, "INFO write fd=%d\n", fd);
     }
     sock_info* soinf = sol_find(fd);
     if (soinf) {

@@ -24,8 +24,8 @@ extern const char* dbg_short_file(const char* path);
 #define __FILE_S__ dbg_short_file(__FILE__)
 extern "C" long gettid(); // from linux.cc
 void fprintf_pos_fun(FILE* ff, const char* file, int line, const char* fun, const char* fmt, ...);
-//#define fprintf_pos(ff, fmt, ...) { fprintf(ff, "DBG tid=% 5d %s:%d %s " fmt,  gettid(), dbg_short_file(__FILE__), __LINE__, __FUNCTION__, __VA_ARGS__ ); }
-#define fprintf_pos(ff, fmt, ...) { fprintf_pos_fun(ff, __FILE__, __LINE__, __FUNCTION__, fmt, __VA_ARGS__ ); }
+#define fprintf_pos(ff, fmt, ...) { fprintf(ff, "DBG tid=% 5d %s:%d %s " fmt,  gettid(), dbg_short_file(__FILE__), __LINE__, __FUNCTION__, __VA_ARGS__ ); }
+//#define fprintf_pos(ff, fmt, ...) { fprintf_pos_fun(ff, __FILE__, __LINE__, __FUNCTION__, fmt, __VA_ARGS__ ); }
 
 #ifndef NDEBUG
 /**

@@ -48,12 +48,12 @@ logger::~logger()
 }
 
 void fprintf_pos_fun(FILE* ff, const char* file, int line, const char* fun, const char* fmt, ...) {
-    return;
+    //return;
     va_list argptr;
-    va_start(argptr, fmt);
-    //vsnprintf(msg, 512, fmt, argptr);
     //fprintf(ff, "DBG tid=% 5d %s:%d %s ",  gettid(), dbg_short_file(file), line, fun, argptr );
     fprintf(ff, "DBG tid=% 5d %s:%d %s ",  gettid(), dbg_short_file(file), line, fun );
+    va_start(argptr, fmt);
+    //vsnprintf(msg, 512, fmt, argptr);
     fprintf(ff, fmt, argptr );
     va_end(argptr);
 
