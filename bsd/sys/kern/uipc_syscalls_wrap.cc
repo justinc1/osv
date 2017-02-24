@@ -1065,6 +1065,12 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 		if (soinf_peer) {
 			peer_fd = soinf_peer->fd;
 		}
+		else {
+			// peer_fd je se vedno -1, in ne morem poslati.
+			// se zgodi, ko iperf server zapre svoj port, in client se vedno probova poslati
+			fprintf_pos(stderr, "ERROR no valid peer found me/peer %d %d, soinf_peer=%p.\n", fd, peer_fd, soinf_peer);
+			return 0;
+		}
 		fprintf_pos(stderr, "INFO fd=%d me %d_0x%08x:%d peer %d_0x%08x:%d try to bypass\n", 
 			fd, fd, ntohl(soinf->my_addr), ntohs(soinf->my_port),
 			peer_fd, ntohl(peer_addr), ntohs(peer_port));
