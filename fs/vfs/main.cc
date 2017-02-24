@@ -82,6 +82,13 @@
 
 using namespace std;
 
+/*---------------------------------------------------------------------*/
+class sock_info;
+sock_info* sol_find(int fd);
+void sol_remove(int fd, int protocol);
+
+/*---------------------------------------------------------------------*/
+
 
 #ifdef DEBUG_VFS
 int	vfs_debug = VFSDB_FLAGS;
@@ -232,6 +239,17 @@ TRACEPOINT(trace_vfs_close_err, "%d", int);
 int close(int fd)
 {
     int error;
+
+    if(fd>2) {
+        //fprintf_pos(stderr, "INFO close fd=%d\n", fd);
+        sock_info* soinf = sol_find(fd);
+        if (soinf) {
+            fprintf_pos(stderr, "INFO close-ing socket fd=%d\n", fd);
+            sol_remove(fd, -1);
+
+        }
+    }
+
 
     trace_vfs_close(fd);
     error = fdclose(fd);
@@ -433,7 +451,7 @@ ssize_t write(int fd, const void *buf, size_t count) /**/
     }
     
     ret = pwrite(fd, buf, count, -1);
-    sendto_bypass_part2(fd);
+    //sendto_bypass_part2(fd);
     return ret;
 }
 

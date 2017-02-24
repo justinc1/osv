@@ -336,6 +336,7 @@ static std::string read_file(std::string fn)
           std::istreambuf_iterator<char>());
 }
 
+void ipbypass_setup();
 void* do_main_thread(void *_main_args)
 {
     auto main_args = static_cast<std::tuple<int,char**> *>(_main_args);
@@ -428,6 +429,8 @@ void* do_main_thread(void *_main_args)
     if (opt_bootchart) {
         boot_time.print_chart();
     }
+
+    ipbypass_setup();
 
     if (!opt_redirect.empty()) {
         // redirect stdout and stdin to the given file, instead of the console

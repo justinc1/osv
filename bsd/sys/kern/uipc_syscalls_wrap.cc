@@ -16,8 +16,27 @@
 #include <boost/circular_buffer.hpp>
 #include <arpa/inet.h>  /* for sockaddr_in and inet_ntoa() */
 
-//#undef fprintf_pos
-//#define fprintf_pos(...) /**/
+#if 1
+#  undef fprintf_pos
+#  define fprintf_pos(...) /**/
+#endif
+
+#define BYPASS_BUF_SZ (1024*1024*30)
+
+uint32_t my_ip_addr = 0x00000000;
+// all sockets
+class sock_info;
+std::vector<sock_info*> so_list;
+
+// v host order
+//#define IPV4_TO_UINT32(a,b,c,d) ( (((a&0x000000FF)*256 + (b&0x000000FF))*256 + (c&0x000000FF))*256 + (d&0x000000FF) )
+#define IPV4_TO_UINT32(a,b,c,d) (ntohl( (a)*0x01000000ul + (b)*0x00010000ul + (c)*0x00000100ul + (d)*0x00000001ul ))
+void ipbypass_setup() {
+	fprintf_pos(stderr, "TADA...\n", "");
+	//sleep(1);
+	my_ip_addr = IPV4_TO_UINT32(192,168,122,90);
+	so_list.reserve(10);
+}
 
 bool in_range(size_t val, size_t low, size_t high)
 {
@@ -45,6 +64,7 @@ public:
 class RingBuffer {
 public:
 	RingBuffer();
+	~RingBuffer();
 	void alloc(size_t len);
 	size_t push(const void* buf, size_t len);
 	size_t pop(void* buf, size_t len);
@@ -65,6 +85,21 @@ public:
 RingBuffer::RingBuffer()
 {
 	data = nullptr;
+	fprintf_pos(stderr, "RingBuffer::RingBuffer this=%p data=%p at %p \n", this, data, &data);
+	length = 0;
+	rpos = 0;
+	wpos = 0;
+	// da ne bo cakanja na malloc v prvem recvfrom. Ce je sploh problem cakanje na malloc - mogoce samo IP-layer malo steka :/
+	//alloc(BYPASS_BUF_SZ);
+}
+
+RingBuffer::~RingBuffer()
+{
+	if (data) {
+		fprintf_pos(stderr, "RingBuffer::~RingBuffer this=%p free-ing data=%p at %p \n", this, data, &data);
+		free(data);
+	}
+	data = nullptr;
 	length = 0;
 	rpos = 0;
 	wpos = 0;
@@ -77,7 +112,7 @@ void RingBuffer::alloc(size_t len)
 	data = (char*)malloc(len);
 	if (!data)
 		return;
-	fprintf(stderr, "RingBuffer::alloc data=%p len=%d\n", data, len);
+	fprintf_pos(stderr, "RingBuffer::alloc this=%p data=%p at %p len=%d\n", this, data, &data, len);
 	memset(data, 0x11, len);
 	length = len;
 	rpos = 0;
@@ -132,10 +167,18 @@ size_t RingBuffer::push(const void* buf, size_t len)
 		usleep(1);
 	}
 	hdr.length = len;
+	size_t len1, len2, old_wpos;
+	old_wpos = wpos;
 	//fprintf(stderr, "RingBuffer::push-ing len=%d , rpos=%d, wpos=%d\n", len, rpos, wpos);
-	push_part(&hdr, sizeof(hdr));
-	push_part(buf, len);
+	len1 = push_part(&hdr, sizeof(hdr));
+	len2 = push_part(buf, len);
 	//fprintf(stderr, "RingBuffer::push-ed  len=%d , rpos=%d, wpos=%d\n", len, rpos, wpos);
+	assert(len1 == sizeof(hdr));
+	assert(len2 == len);
+	// check stored length
+	len1 = ((RingMessageHdr*)(void*)(data+old_wpos))->length;
+	assert(len1 == hdr.length);
+	assert(len1 == len);
 	return len;
 }
 
@@ -163,16 +206,23 @@ size_t RingBuffer::pop_part(void* buf, size_t len)
 size_t RingBuffer::pop(void* buf, size_t len)
 {
 	RingMessageHdr hdr;
-	size_t readable_len = available_read();
+	size_t readable_len;
 	/* if (sizeof(hdr) + 0 > readable_len) {
 		// no packet
 		return 0;
 	} */
 	//fprintf(stderr, "RingBuffer::pop\n");
-	while (sizeof(hdr) + 1 > available_read()) {
-		fprintf(stderr, "RingBuffer::pop delay\n");
+	int cnt = 0;
+	// (sizeof(hdr)+1 -> assume all mesages are at least 1 B long.
+	// otehrwise, the assert(sizeof(hdr) + hdr.length <= readable_len); fails
+	while ((sizeof(hdr) + 1) > (readable_len = available_read())) {
+		if(cnt==0)
+			fprintf(stderr, "RingBuffer::pop delay cnt=%d readable_len=%d wpos=%d rpos=%d\n", cnt, (int)readable_len, wpos, rpos);
+		cnt++;
 		usleep(1);
 	}
+		if(cnt>0)
+			fprintf(stderr, "RingBuffer::pop delay cnt=%d readable_len=%d wpos=%d rpos=%d\n", cnt, (int)readable_len, wpos, rpos);
 	//fprintf(stderr, "RingBuffer::pop-ing len=%d , rpos=%d, wpos=%d\n", len, rpos, wpos);
 	pop_part(&hdr, sizeof(hdr));
 	assert(sizeof(hdr) + hdr.length <= readable_len);
@@ -224,8 +274,6 @@ sock_info::sock_info() {
 	peer_fd = -1;
 }
 
-#define BYPASS_BUF_SZ (1024*1024*300)
-
 void sock_info::bypass(uint32_t _peer_addr, ushort _peer_port, int _peer_fd) {
 	if (!is_bypass) {
 		is_bypass = true;
@@ -236,8 +284,9 @@ void sock_info::bypass(uint32_t _peer_addr, ushort _peer_port, int _peer_fd) {
 		ring_buf.alloc(BYPASS_BUF_SZ);
 		//fprintf_pos(stderr, "INFO fd=%d, in_buf size=%d capacity=%d reserve=%d\n",
 		//	fd, in_buf.size(), in_buf.capacity(), in_buf.reserve() );
-		fprintf_pos(stderr, "INFO fd=%d peer fd=%d,addr=0x%08x,port=%d\n",
-			fd, peer_fd, ntohl(peer_addr), ntohs(peer_port));
+		fprintf_pos(stderr, "INFO fd=%d this=%p is_bypass=%d peer fd=%d,addr=0x%08x,port=%d\n",
+			fd, this, is_bypass, 
+			peer_fd, ntohl(peer_addr), ntohs(peer_port));
 	}
 }
 
@@ -276,58 +325,88 @@ size_t sock_info::data_pop(void* buf, size_t len) {
 }
 
 
-// all sockets
-std::vector<sock_info> so_list;
-
 void sol_insert(int fd, int protocol) {
-	sock_info soinf;
-	soinf.fd = fd;
-	soinf.my_proto = protocol;
+	sock_info *soinf = new sock_info;
+	fprintf(stderr, "INSERT-ing fd=%d soinf=%p\n", fd, soinf);
+	soinf->fd = fd;
+	soinf->my_proto = protocol;
 	so_list.push_back(soinf);
+	fprintf(stderr, "INSERT-ed fd=%d soinf=%p\n", fd, soinf);
+}
+
+void sol_remove(int fd, int protocol) {
+	fprintf_pos(stderr, "DELETE-ing fd=%d\n", fd);
+	// TODO a bi moral tudi peer-a removati?
+	for (auto it = so_list.begin(); it != so_list.end(); ) {
+		sock_info *soinf = *it;
+		if (soinf && soinf->fd == fd) {
+
+			//so_list.erase(it); // invalidira vse iteratorje. predvsem sam it iteratero..........
+			//*it = nullptr; // fake delete
+			//it = so_list.erase(it); // samo potem ne moreta dva thread parallelno iskati po listi.
+
+			// fake delete, in se vedno crashne
+			// treba se malo pavze, da ta-drugi-thread neha dostopati (iperf client neha posiljati)
+			// std::shared_ptr
+			sleep(1);
+			*it = nullptr;
+			
+
+			fprintf_pos(stderr, "DELETE-ed fd=%d soinf=%p\n", fd, soinf);
+			memset(soinf, 0x00, sizeof(*soinf));
+			delete soinf;
+		}
+		else {
+			it++;
+		}
+	}
 }
 
 sock_info* sol_find(int fd) {
 	auto it = std::find_if(so_list.begin(), so_list.end(), 
-		[&] (sock_info soinf) { return soinf.fd == fd; } );
+		[&] (sock_info *soinf) { return soinf && soinf->fd == fd; } );
 	if (it == so_list.end()) {
 		if(fd>5) {
 			fprintf_pos(stderr, "ERROR fd=%d not found\n", fd);
 		}
 		return nullptr;
 	}
-	return &(*it);
+	return *it;
 }
 
 sock_info* sol_find_me(int fd, uint32_t my_addr, ushort my_port) {
 	auto it = std::find_if(so_list.begin(), so_list.end(), 
-		[&] (sock_info soinf) { 
+		[&] (sock_info *soinf) { 
 			// protocol pa kar ignoriram, jejhetaja.
-			return 	(soinf.my_addr == INADDR_ANY || soinf.my_addr == my_addr) &&
-					(soinf.my_port == my_port);
+			return 	soinf && 
+					(soinf->my_addr == INADDR_ANY || soinf->my_addr == my_addr) &&
+					(soinf->my_port == my_port);
 		});
 	if (it == so_list.end()) {
 		fprintf_pos(stderr, "ERROR fd=%d me 0x%08x:%d not found\n", fd, ntohl(my_addr), ntohs(my_port));
 		return nullptr;
 	}
-	return &(*it);
+	return *it;
 }
 sock_info* sol_find_peer2(int fd, uint32_t peer_addr, ushort peer_port) {
 	auto it = std::find_if(so_list.begin(), so_list.end(), 
-		[&] (sock_info soinf) { 
+		[&] (sock_info *soinf) {
+			if (!soinf)
+				return false; 
 			// protocol pa kar ignoriram, jejhetaja.
 			int addr_match;
 			//uint32_t my_iface_ip_addr = htonl( 0xc0a87a5a ); // 192.168.122.90 test VM ip :/
-			addr_match = soinf.peer_addr == INADDR_ANY || 
-				soinf.peer_addr == peer_addr ||
+			addr_match = soinf->peer_addr == INADDR_ANY || 
+				soinf->peer_addr == peer_addr ||
 				//(peer_addr == my_iface_ip_addr) ||
 				(peer_addr == INADDR_ANY); // tale pogoj bo pa napacen. ker zdaj bi 
-			return addr_match && (soinf.peer_port == peer_port);
+			return addr_match && (soinf->peer_port == peer_port);
 		});
 	if (it == so_list.end()) {
 		fprintf_pos(stderr, "ERROR fd=%d peer 0x%08x:%d not found\n", fd, ntohl(peer_addr), ntohs(peer_port));
 		return nullptr;
 	}
-	return &(*it);
+	return *it;
 }
 bool so_bypass_possible(sock_info* soinf, ushort port) {
 	
@@ -478,12 +557,24 @@ int bind(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	struct sockaddr_in* in_addr = (sockaddr_in*)(void*)addr;
 	soinf->my_addr = in_addr->sin_addr.s_addr;
 	soinf->my_port = in_addr->sin_port;
-	fprintf_pos(stderr, "fd=%d me 0x%08x:%d\n", fd, ntohl(soinf->my_addr), ntohs(soinf->my_port));
+	fprintf_pos(stderr, "fd=%d me %d_0x%08x:%d\n", fd, fd, ntohl(soinf->my_addr), ntohs(soinf->my_port));
 
 	// enable bypass for all server-side sockets.
 	// But not to early.
 	//soinf->bypass();
-
+	//int peer_fd = -1;
+	if ( so_bypass_possible(soinf, soinf->my_port) &&
+		  (soinf->my_addr == my_ip_addr ||
+		   soinf->my_addr == 0x00000000 /*ANY ADDR*/ )
+	   ) {
+		fprintf_pos(stderr, "INFO fd=%d me %d_0x%08x:%d try to bypass\n", 
+			fd, fd, ntohl(soinf->my_addr), ntohs(soinf->my_port));
+		soinf->bypass();
+	}
+	else {
+		fprintf_pos(stderr, "INFO fd=%d me %d_0x%08x:%d bypass not possible\n", 
+			fd, ntohl(soinf->my_addr), ntohs(soinf->my_port));
+	}
 
 #if 0
 	// soinf->my_addr = ((sockaddr_in*)(addr))->sin_addr.s_addr;
@@ -526,6 +617,7 @@ linux_bind(int s, void *name, int namelen)
 	return 0;
 }
 
+// PA ze v bind treba bypass prizgati, ce se le da...
 extern "C"
 int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 {
@@ -533,15 +625,6 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 
 	sock_d("connect(fd=%d, ...)", fd);
 	fprintf_pos(stderr, "INFO connect fd=%d\n", fd);
-
-	/* ta connect crkne, ce je to UDP server - t.j. bind, nato connect. Vmes moras vsaj en paket prejeti? */
-	error = linux_connect(fd, (void *)addr, len);
-	if (error) {
-		sock_d("connect() failed, errno=%d", error);
-		fprintf_pos(stderr, "ERROR connect() failed, errno=%d\n", error);
-		errno = error;
-		return -1;
-	}
 
 	// if we connect to intra-host VM, use bypass
 	// OR, if we connect to the same-VM, use bypass
@@ -551,24 +634,78 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		return -1;
 	}
 
+	/*
+	client se povezuje na obstojec server
+	client se povezuje na server, ki se ne tece
+	server se povezuje "nazaj" na client, ki ze tece.
+	*/
+
 	struct sockaddr_in* in_addr = (sockaddr_in*)(void*)addr;
 	uint32_t peer_addr = in_addr->sin_addr.s_addr;
 	ushort peer_port = in_addr->sin_port;
+	int peer_fd = -1;
+	bool do_linux_connect = true;
 	fprintf_pos(stderr, "INFO connect fd=%d peer addr=0x%08x,port=%d\n", fd, ntohl(peer_addr), ntohs(peer_port));
-	if (so_bypass_possible(soinf, soinf->my_port) ||
-		so_bypass_possible(soinf, peer_port)) {
-		fprintf_pos(stderr, "INFO connect fd=%d me=0x%08x:%d peer 0x%08x:%d try to bypass\n", 
-			fd, ntohl(soinf->my_addr), ntohs(soinf->my_port), ntohl(peer_addr), ntohs(peer_port));
-		// soinf->bypass(peer_addr, peer_port);
-		soinf->peer_addr = peer_addr;
-		soinf->peer_port = peer_port;
-		// soinf->peer_fd bo pa recvfrom nastavil
+	if ( (so_bypass_possible(soinf, soinf->my_port) ||
+		  so_bypass_possible(soinf, peer_port) ) &&
+		  (
+		  	(peer_addr == my_ip_addr) ||
+
+		  	// real-ip-stack ni videl paketa, ki ga je client poslal serverju.
+		  	// in zdaj se server ne more connect. No, med drugim je tu v *addr vse 0x00, ker 
+		  	// sem malo prevec poenostavil .... 
+		  	// Potem bo crknil na linux_connect, kar je ssss.
+		  	// Najbrz bi bilo OK, ce bi vedel, kak s katerega IP:port bi mi client posiljal ...
+		  	// zaenkrat preskocim linux_connect.
+			(soinf->my_addr==0x00000000 && soinf->my_port>0) /*najbrz jaz poslusam, je peer lahko prazen, ker sem goljufal*/
+		  )
+	   ) {
+
+		//do_linux_connect = false;
+
+		// peer socket je ze odprt, ali pa tudi se ni.
+		// tako da peer_fd bom nasel, ali pa tudi ne.
+		// TODO
+		// ce peer-a se ni, ga bom moral iskati po vsakem recvmsg ??
+		sock_info *soinf_peer = sol_find_peer2(fd, peer_addr, peer_port);
+		// assert(soinf_peer != nullptr); // ali pa implementiraj se varianto "najprej client, potem server"
+		if (soinf_peer) {
+			peer_fd = soinf_peer->fd;
+		}
+		fprintf_pos(stderr, "INFO connect fd=%d me %d_0x%08x:%d peer %d_0x%08x:%d try to bypass\n", 
+			fd, fd, ntohl(soinf->my_addr), ntohs(soinf->my_port),
+			peer_fd, ntohl(peer_addr), ntohs(peer_port));
+		if(soinf->is_bypass) {
+			fprintf_pos(stderr, "INFO already bypass-ed fd me/peer %d %d.", fd, peer_fd);
+		}
+		else {
+			soinf->bypass(peer_addr, peer_port, peer_fd);
+		}
 	}
 	else {
 		fprintf_pos(stderr, "INFO connect fd=%d me=0x%08x:%d peer 0x%08x:%d bypass not possible\n", 
 			fd, ntohl(soinf->my_addr), ntohs(soinf->my_port), ntohl(peer_addr), ntohs(peer_port));
 	}
-	
+
+	/* ta connect crkne, ce je to UDP server - t.j. bind, nato connect. Vmes moras vsaj en paket prejeti?
+	Samo potem, ko preskocim connect, me pa zaj naslednji server socket, ko nov thread javi "bind failed: Address in use".
+	 */
+	if (in_addr->sin_port == 0) {
+		do_linux_connect = false;
+	}
+	if (!do_linux_connect) {
+	error = linux_connect(fd, (void *)addr, len);
+	if (error) {
+		sock_d("connect() failed, errno=%d", error);
+		fprintf_pos(stderr, "ERROR connect() failed, errno=%d\n", error);
+		errno = error;
+		return -1;
+	}
+	}//skip_linux_connect
+	else {
+		fprintf_pos(stderr, "INFO linux_connect was skipped!!!\n", "");
+	}
+
 	return 0;
 }
 
@@ -657,6 +794,11 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 	}
 	fprintf_pos(stderr, "fd=%d BYPASS-ed\n", fd);
 
+	// ce sem od prejsnjega branja dobil dva pakate, potem sem dvakrat nastavil flag/event za sbwait.
+	// ampak sbwait() bo sedaj samo enkrat pocistil, 
+	// tako da, ce podatki so, potem jih beri brez sbwait() cakanja.
+	if( soinf->ring_buf.available_read() <= sizeof(RingMessageHdr) ) {
+
 	/* bsd/sys/kern/uipc_syscalls.cc:608 +- eps */
 	int error;
 	struct file *fp;
@@ -671,11 +813,23 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 	//error = sbwait(so, &so->so_rcv); /* se obesi, oz dobim samo vsak drugi paket... */
 	SOCK_UNLOCK(so);
 	fdrop(fp); /* TODO PAZI !!! */
+	
+	}
 
-	//fprintf_pos(stderr, "soinf=%p %d\n", soinf, soinf?soinf->fd:-1);
-	size_t len2;
-	len2 = soinf->data_pop(buf, len);
-	return len2;
+	/*
+	Socket je bypass-ed. Ne smem iti recvfrom -> linux_recvfrom, ker utegne tam neskoncno dolgo viseti.
+	Ali pa morda tudi kak paket pozabi (ker preveckrat kilcem sbwait()?)
+	Torej bom kar probal cakati na podatke ;?>
+
+	to mi bo morda spet zj... iperf :/
+	*/
+	// if (soinf->ring_buf.available_read() > sizeof(RingMessageHdr))
+	{
+		//fprintf_pos(stderr, "soinf=%p %d\n", soinf, soinf?soinf->fd:-1);
+		size_t len2;
+		len2 = soinf->data_pop(buf, len);
+		return len2;
+	}
 
 	return 0;
 }
@@ -703,6 +857,7 @@ ssize_t recvfrom(int fd, void *__restrict buf, size_t len, int flags,
 		return -1;
 	}
 
+#if 0
 	// try to enable bypass after first received packet
  	sock_info *soinf = sol_find(fd);
 	if(!soinf) {
@@ -740,7 +895,7 @@ ssize_t recvfrom(int fd, void *__restrict buf, size_t len, int flags,
 		fprintf_pos(stderr, "INFO fd=%d me=0x%08x:%d peer 0x%08x:%d bypass not possible\n", 
 			fd, ntohl(soinf->my_addr), ntohs(soinf->my_port), ntohl(peer_addr), ntohs(peer_port));
 	}
-
+#endif
 	return bytes;
 }
 
@@ -796,17 +951,20 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
     const struct bsd_sockaddr *addr, socklen_t alen) {
 	int error;
  	sock_info *soinf = sol_find(fd);
-	//fprintf_pos(stderr, "soinf=%p %d\n", soinf, soinf?soinf->fd:-1);
+	fprintf_pos(stderr, "fd=%d soinf=%p %d\n", fd, soinf, soinf?soinf->fd:-1);
 	if(!soinf) {
 		return 0;
 	}
 
+	// no, zdaj pa bom morda bypass omogocil ob prvem poslanem paketu
+	/*
 	if (!soinf->is_bypass) {
 		return 0;
-	}
+	}*/
 
 	uint32_t peer_addr = 0xFFFFFFFF;
 	ushort peer_port = 0;
+	int peer_fd = -1;
 	if (addr) {
 		struct sockaddr_in* in_addr = (sockaddr_in*)(void*)addr;
 		peer_addr = in_addr->sin_addr.s_addr;
@@ -823,24 +981,85 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	}
 	// OK, peer seems to be known and our.
 
-	fprintf_pos(stderr, "fd=%d BYPASS-ed\n", fd);
 	fprintf_pos(stderr, "fd=%d peer_addr=0x%08x peer_port=%d\n", fd, ntohl(peer_addr), ntohs(peer_port));
+
+
+
+	// isto kot v connect - samo ce imas sendto, potem lahko connect preskocis ...
+	fprintf_pos(stderr, "INFO fd=%d me %d_0x%08x:%d, peer addr=0x%08x,port=%d\n", fd, 
+		soinf->fd, ntohl(soinf->my_addr), ntohs(soinf->my_port),
+		ntohl(peer_addr), ntohs(peer_port));
+	/*int aa,bb,cc;
+	aa = so_bypass_possible(soinf, soinf->my_port);
+	bb = so_bypass_possible(soinf, peer_port);
+	cc = peer_addr == my_ip_addr;
+	fprintf_pos(stderr, "DBG abc %d %d %d\n", aa, bb, cc); */
+	sock_info *soinf_peer = nullptr;
+	if ( (so_bypass_possible(soinf, soinf->my_port) ||
+		  so_bypass_possible(soinf, peer_port) ) &&
+		  (peer_addr == my_ip_addr)
+	   ) {
+		// peer socket je ze odprt, ali pa tudi se ni.
+		// tako da peer_fd bom nasel, ali pa tudi ne.
+		// TODO
+		// ce peer-a se ni, ga bom moral iskati po vsakem recvmsg ??
+		//soinf_peer = sol_find_peer2(fd, peer_addr, peer_port);
+		// No, dajmo iskati vse 'moje' sockete, ki poslusajo na peer_port.
+		// Na njih posiljam, oni so moj peer.
+		soinf_peer = sol_find_me(fd, peer_addr, peer_port);
+
+		// assert(soinf_peer != nullptr); // ali pa implementiraj se varianto "najprej client, potem server"
+		if (soinf_peer) {
+			peer_fd = soinf_peer->fd;
+		}
+		fprintf_pos(stderr, "INFO fd=%d me %d_0x%08x:%d peer %d_0x%08x:%d try to bypass\n", 
+			fd, fd, ntohl(soinf->my_addr), ntohs(soinf->my_port),
+			peer_fd, ntohl(peer_addr), ntohs(peer_port));
+		if(soinf->is_bypass) {
+			fprintf_pos(stderr, "INFO already bypass-ed fd me/peer %d %d.\n", fd, peer_fd);
+		}
+		else {
+			soinf->bypass(peer_addr, peer_port, peer_fd);
+		}
+	}
+	else {
+		fprintf_pos(stderr, "INFO fd=%d me=0x%08x:%d peer 0x%08x:%d bypass not possible\n", 
+			fd, ntohl(soinf->my_addr), ntohs(soinf->my_port), ntohl(peer_addr), ntohs(peer_port));
+		return 0;
+	}
+
+
+
+
+
+
+	fprintf_pos(stderr, "fd=%d BYPASS-ed\n", fd);
 	// zdaj pa najdi enga, ki temu ustreza
 	// CEL JEBENI ROUTING BI MORAL EVALUIRATI !!!!! fuck.
 	// Pa - a naj gledam IP addr ali MAC addr ?
  	
  	//sock_info *soinf_peer = sol_find_me(fd, peer_addr, peer_port);
- 	sock_info *soinf_peer = sol_find(soinf->peer_fd);
- 	assert(soinf_peer->peer_fd == fd);
+ 	////////sock_info *soinf_peer = sol_find(soinf->peer_fd);
+ 	
+ 	// Ok, peer je server, ki nam odgovori via sendto. Potem je lahko soinf_peer->peer_fd == -1, in != fd.
+ 	// Sele po (morebitnem!) connect() se soinf_peer->peer_fd nastavi na znan fd.
+ 	// Tako da tu tega se ne morem preveriti. 
+ 	//assert(soinf_peer->peer_fd == fd);
 
-		size_t len2=0;
- 	if (soinf_peer) {
-			len2 = soinf_peer->data_push(buf, len);
-		}
-		else {
-			//return 0; // samo da ne posljem pravega paketa, lazje debugiram
-			return len; // itak da je uspelo
-		}
+	// ta bi pa moral drzati. vsaj za client stran.
+	// ali pa, vsaj en od obeh bi moral drzati. Vsaj nekdo mora vedetik, kam hoce posiljati :).
+	// razen, morda, ce vsi pocnejo samo sendto.
+	// Meh, iperf client - tu zavpije
+ 	//assert(soinf_peer->fd == soinf->peer_fd);
+
+	fprintf_pos(stderr, "fd=%d me %d_0x%08x:%d peer %d_0x%08x:%d\n", fd,
+		soinf->fd, ntohl(soinf->my_addr), ntohs(soinf->my_port),
+		soinf_peer->fd, ntohl(soinf_peer->my_addr), ntohs(soinf_peer->my_port));
+
+	assert(soinf_peer->is_bypass);
+	assert(soinf_peer->ring_buf.data);
+	size_t len2=0;
+	len2 = soinf_peer->data_push(buf, len);
 
 	/* bsd/sys/kern/uipc_syscalls.cc:608 +- eps */
 	struct file *fp;
@@ -867,6 +1086,7 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	*/
 }
 
+/*
 // save peer addr/port just after first send
 void sendto_bypass_part2(int fd)
 {
@@ -895,7 +1115,7 @@ void sendto_bypass_part2(int fd)
 			fd, ntohl(soinf->my_addr), ntohs(soinf->my_port), ntohl(peer_addr), ntohs(peer_port));
 	}
 	//soinf->bypass();
-}
+}*/
 
 extern "C"
 ssize_t sendto(int fd, const void *buf, size_t len, int flags,
@@ -920,7 +1140,7 @@ ssize_t sendto(int fd, const void *buf, size_t len, int flags,
 		return -1;
 	}
 
-
+#if 0
 	// try to enable bypass after first sent packet
 	// NO, receiver might not be up yet.
 	// So, receiver should enable bypass for sender, after he gets first packet.
@@ -952,7 +1172,7 @@ ssize_t sendto(int fd, const void *buf, size_t len, int flags,
 			fd, ntohl(soinf->my_addr), ntohs(soinf->my_port), ntohl(peer_addr), ntohs(peer_port));
 	}*/
 	//soinf->bypass();
-
+#endif
 
 	return bytes;
 }
@@ -1049,6 +1269,9 @@ int shutdown(int fd, int how)
 	int error;
 
 	sock_d("shutdown(fd=%d, how=%d)", fd, how);
+	fprintf_pos(stderr, "fd=%d\n", fd);
+
+    sol_remove(fd, -1);
 
 	// Try first if it's a AF_LOCAL socket (af_local.cc), and if not
 	// fall back to network sockets. TODO: do this more cleanly.
@@ -1084,7 +1307,7 @@ int socket(int domain, int type, int protocol) /**/
 	return s;
 }
 
-extern "C"
+/*extern "C"
 int so_bypass(int fd)
 {
 	sock_info *soinf = sol_find(fd);
@@ -1094,4 +1317,4 @@ int so_bypass(int fd)
 	}
 	soinf->bypass();
 	return 0;  
-}
+}*/
