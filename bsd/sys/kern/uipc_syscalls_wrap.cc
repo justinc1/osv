@@ -163,8 +163,8 @@ size_t RingBuffer::push(const void* buf, size_t len)
 	while (sizeof(hdr) + len > available_write()) {
 		// drop packet
 		//return 0;
-		fprintf(stderr, "RingBuffer::push delay\n");
-		usleep(1);
+		fprintf_pos(stderr, "RingBuffer::push delay\n");
+		//usleep(1);
 	}
 	hdr.length = len;
 	size_t len1, len2, old_wpos;
@@ -217,12 +217,12 @@ size_t RingBuffer::pop(void* buf, size_t len)
 	// otehrwise, the assert(sizeof(hdr) + hdr.length <= readable_len); fails
 	while ((sizeof(hdr) + 1) > (readable_len = available_read())) {
 		if(cnt==0)
-			fprintf(stderr, "RingBuffer::pop delay cnt=%d readable_len=%d wpos=%d rpos=%d\n", cnt, (int)readable_len, wpos, rpos);
+			fprintf_pos(stderr, "RingBuffer::pop delay cnt=%d readable_len=%d wpos=%d rpos=%d\n", cnt, (int)readable_len, wpos, rpos);
 		cnt++;
-		usleep(1);
+		//usleep(1);
 	}
 		if(cnt>0)
-			fprintf(stderr, "RingBuffer::pop delay cnt=%d readable_len=%d wpos=%d rpos=%d\n", cnt, (int)readable_len, wpos, rpos);
+			fprintf_pos(stderr, "RingBuffer::pop delay cnt=%d readable_len=%d wpos=%d rpos=%d\n", cnt, (int)readable_len, wpos, rpos);
 	//fprintf(stderr, "RingBuffer::pop-ing len=%d , rpos=%d, wpos=%d\n", len, rpos, wpos);
 	pop_part(&hdr, sizeof(hdr));
 	assert(sizeof(hdr) + hdr.length <= readable_len);
