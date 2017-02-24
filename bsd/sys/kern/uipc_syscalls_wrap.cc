@@ -16,7 +16,7 @@
 #include <boost/circular_buffer.hpp>
 #include <arpa/inet.h>  /* for sockaddr_in and inet_ntoa() */
 
-#if 1
+#if 0
 #  undef fprintf_pos
 #  define fprintf_pos(...) /**/
 #endif
@@ -568,12 +568,12 @@ int bind(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		   soinf->my_addr == 0x00000000 /*ANY ADDR*/ )
 	   ) {
 		fprintf_pos(stderr, "INFO fd=%d me %d_0x%08x:%d try to bypass\n", 
-			fd, fd, ntohl(soinf->my_addr), ntohs(soinf->my_port));
+			fd, soinf->fd, ntohl(soinf->my_addr), ntohs(soinf->my_port));
 		soinf->bypass();
 	}
 	else {
 		fprintf_pos(stderr, "INFO fd=%d me %d_0x%08x:%d bypass not possible\n", 
-			fd, ntohl(soinf->my_addr), ntohs(soinf->my_port));
+			fd, soinf->fd, ntohl(soinf->my_addr), ntohs(soinf->my_port));
 	}
 
 #if 0
@@ -644,7 +644,8 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	uint32_t peer_addr = in_addr->sin_addr.s_addr;
 	ushort peer_port = in_addr->sin_port;
 	int peer_fd = -1;
-	bool do_linux_connect = true;
+	sock_info *soinf_peer = nullptr;
+	//bool do_linux_connect = true;
 	fprintf_pos(stderr, "INFO connect fd=%d peer addr=0x%08x,port=%d\n", fd, ntohl(peer_addr), ntohs(peer_port));
 	if ( (so_bypass_possible(soinf, soinf->my_port) ||
 		  so_bypass_possible(soinf, peer_port) ) &&
@@ -667,8 +668,21 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		// tako da peer_fd bom nasel, ali pa tudi ne.
 		// TODO
 		// ce peer-a se ni, ga bom moral iskati po vsakem recvmsg ??
-		sock_info *soinf_peer = sol_find_peer2(fd, peer_addr, peer_port);
-		// assert(soinf_peer != nullptr); // ali pa implementiraj se varianto "najprej client, potem server"
+
+		//sock_info *soinf_peer = sol_find_peer2(fd, peer_addr, peer_port);
+		if(peer_port != 0) {
+			// to je ok za UDP clienta - ta se poveze za znani server ip/port.
+			soinf_peer = sol_find_me(fd, peer_addr, peer_port);
+		}
+		else {
+			// najbrz smo server, ki se povezuje nazaj na clienta.
+			// peer of peer-a sem jaz logika
+			// oz kdor ima mene za peer-a, tistega bom jaz imel za peer-a.
+			soinf_peer = sol_find_peer2(fd, soinf->my_addr, soinf->my_port);
+		}
+		
+		assert(soinf_peer != nullptr); // ali pa implementiraj se varianto "najprej client, potem server"
+		
 		if (soinf_peer) {
 			peer_fd = soinf_peer->fd;
 		}
@@ -676,7 +690,11 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 			fd, fd, ntohl(soinf->my_addr), ntohs(soinf->my_port),
 			peer_fd, ntohl(peer_addr), ntohs(peer_port));
 		if(soinf->is_bypass) {
-			fprintf_pos(stderr, "INFO already bypass-ed fd me/peer %d %d.", fd, peer_fd);
+			fprintf_pos(stderr, "INFO already bypass-ed fd me/peer %d %d.\n", fd, peer_fd);
+			// hja, zdaj pa is_baypass je ze true, peer_* pa na defualt vrednostih . jej jej jej. 
+			soinf->peer_fd = peer_fd;
+			soinf->peer_addr = peer_addr;
+			soinf->peer_port = peer_port;
 		}
 		else {
 			soinf->bypass(peer_addr, peer_port, peer_fd);
@@ -687,24 +705,59 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 			fd, ntohl(soinf->my_addr), ntohs(soinf->my_port), ntohl(peer_addr), ntohs(peer_port));
 	}
 
+	fprintf_pos(stderr, "INFO connect new_state fd=%d %d_0x%08x:%d <-> %d_0x%08x:%d\n", 
+		fd, 
+		soinf->fd, ntohl(soinf->my_addr), ntohs(soinf->my_port),
+		soinf->peer_fd, ntohl(soinf->peer_addr), ntohs(soinf->peer_port));
+
 	/* ta connect crkne, ce je to UDP server - t.j. bind, nato connect. Vmes moras vsaj en paket prejeti?
 	Samo potem, ko preskocim connect, me pa zaj naslednji server socket, ko nov thread javi "bind failed: Address in use".
 	 */
 	if (in_addr->sin_port == 0) {
-		do_linux_connect = false;
+		//do_linux_connect = false;
+		// server se hoce connectat-i nazaj na clienta, samo zaradi bypass ni izvedel pravega porta.
+		// dodaj se eno goljufijo vec...
+		fprintf(stderr, "INFO INFO INFO connect fd=%d insert faked addr/port from soinf_peer %d_0x%08x:%d\n",
+			fd, soinf_peer->fd, ntohl(soinf_peer->my_addr), ntohs(soinf_peer->my_port));
+		in_addr->sin_addr.s_addr = soinf_peer->my_addr;
+		in_addr->sin_port = soinf_peer->my_port;
 	}
-	if (!do_linux_connect) {
+	fprintf(stderr, "INFO linux_connect fd=%d to in_addr 0x%08x:%d\n",
+		fd, ntohl(in_addr->sin_addr.s_addr), ntohs(in_addr->sin_port));
+
 	error = linux_connect(fd, (void *)addr, len);
 	if (error) {
 		sock_d("connect() failed, errno=%d", error);
 		fprintf_pos(stderr, "ERROR connect() failed, errno=%d\n", error);
 		errno = error;
-		return -1;
+		//return -1;
+
+		// no, pa dajmo probati to na tiho ignorirati :/
+		// sej je samo mali iperf server problem....
+		fprintf(stderr, "ERROR connect() failed, errno=%d NA TIHEM IGNORIRAM< da bo vsaj iperf server nekaj lahko vrnil. Tudi ce potem crashne...\n", error);
+		return 0;
 	}
-	}//skip_linux_connect
-	else {
-		fprintf_pos(stderr, "INFO linux_connect was skipped!!!\n", "");
+
+	// ce se ne poznam moje addr/port
+	//int getsockname(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
+	if (soinf->my_port == 0 || soinf->my_addr == 0xFFFFFFFF || soinf->my_addr == 0x00000000) {
+		struct bsd_sockaddr addr2;
+		socklen_t addr2_len = sizeof(addr2);
+		error = getsockname(fd, &addr2, &addr2_len);
+		if (error) {
+			sock_d("connect / getsockname() failed, error=%d", error);
+			fprintf_pos(stderr, "ERROR connect / getsockname() failed, error=%d\n", error);
+			return -1;
+		}
+		struct sockaddr_in* in_addr2 = (sockaddr_in*)(void*)&addr2;
+		soinf->my_addr = in_addr2->sin_addr.s_addr;
+		soinf->my_port = in_addr2->sin_port;
+		fprintf_pos(stderr, "INFO connect soinf updated fd=%d %d_0x%08x:%d <-> %d_0x%08x:%d\n", 
+			fd, 
+			soinf->fd, ntohl(soinf->my_addr), ntohs(soinf->my_port),
+			soinf->peer_fd, ntohl(soinf->peer_addr), ntohs(soinf->peer_port));
 	}
+
 
 	return 0;
 }
@@ -1129,6 +1182,10 @@ ssize_t sendto(int fd, const void *buf, size_t len, int flags,
 
 	ssize_t len2 = sendto_bypass(fd, buf, len, flags, addr, alen);
 	if (len2) {
+		// a ce vsaj en paket posljme, bo potem lahko server se en connect naredil ?? Please please please...
+		error = linux_sendto(fd, (caddr_t)buf, len, flags, (caddr_t)addr,
+				   alen, &bytes);
+
 		return len2;
 	}
 
