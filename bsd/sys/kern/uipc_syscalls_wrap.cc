@@ -16,17 +16,31 @@
 #include <boost/circular_buffer.hpp>
 #include <arpa/inet.h>  /* for sockaddr_in and inet_ntoa() */
 
-#if 0
+#if 1
 #  undef fprintf_pos
 #  define fprintf_pos(...) /**/
 #endif
 
 #define BYPASS_BUF_SZ (1024*1024*30)
 
+//#define my_memcpy memcpy
+#define my_memcpy memmove
+//#define my_memcpy repmovsb 
+// TODO TRY repmovsb 
+
 uint32_t my_ip_addr = 0x00000000;
+bool do_sbwait = true;
 // all sockets
 class sock_info;
 std::vector<sock_info*> so_list;
+
+inline void* my_memcpy_memcpy(void *dest, const void *src, size_t n) {
+	return memcpy(dest, src, n);
+}
+inline void* my_memcpy_memmove(void *dest, const void *src, size_t n) {
+	return memmove(dest, src, n);
+}
+
 
 // v host order
 //#define IPV4_TO_UINT32(a,b,c,d) ( (((a&0x000000FF)*256 + (b&0x000000FF))*256 + (c&0x000000FF))*256 + (d&0x000000FF) )
@@ -145,14 +159,14 @@ size_t RingBuffer::push_part(const void* buf, size_t len)
 	}
 	wpos2 = wpos + len;
 	if (wpos2 <= length) {
-		memcpy(data + wpos, buf, len);
+		my_memcpy(data + wpos, buf, len);
 		wpos = wpos2;
 	}
 	else {
 		len1 = length - wpos;
 		len2 = len - len1;
-		memcpy(data + wpos, buf, len1);
-		memcpy(data, buf + len1, len2);
+		my_memcpy(data + wpos, buf, len1);
+		my_memcpy(data, buf + len1, len2);
 		wpos = len2;
 	}
 	return len;
@@ -190,14 +204,14 @@ size_t RingBuffer::pop_part(void* buf, size_t len)
 	//size_t readable_len = available_read();
 	rpos2 = rpos + len;
 	if (rpos2 <= length) {
-		memcpy(buf, data + rpos, len);
+		my_memcpy(buf, data + rpos, len);
 		rpos = rpos2;
 	}
 	else {
 		len1 = length - rpos;
 		len2 = len - len1;
-		memcpy(buf, data + rpos, len1);
-		memcpy(buf + len1, data, len2);
+		my_memcpy(buf, data + rpos, len1);
+		my_memcpy(buf + len1, data, len2);
 		rpos = len2;
 	}
 	return len;
@@ -850,6 +864,7 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 	// ce sem od prejsnjega branja dobil dva pakate, potem sem dvakrat nastavil flag/event za sbwait.
 	// ampak sbwait() bo sedaj samo enkrat pocistil, 
 	// tako da, ce podatki so, potem jih beri brez sbwait() cakanja.
+if(do_sbwait) {
 	if( soinf->ring_buf.available_read() <= sizeof(RingMessageHdr) ) {
 
 	/* bsd/sys/kern/uipc_syscalls.cc:608 +- eps */
@@ -861,14 +876,18 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 		return (error);
 	so = (socket*)file_data(fp);
 	/* bsd/sys/kern/uipc_socket.cc:2425 */
-	SOCK_LOCK(so);
+	SOCK_LOCK(so);  // ce dam stran: Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
 	error = sbwait(so, &so->so_rcv);
 	//error = sbwait(so, &so->so_rcv); /* se obesi, oz dobim samo vsak drugi paket... */
 	SOCK_UNLOCK(so);
 	fdrop(fp); /* TODO PAZI !!! */
 	
 	}
-
+}
+else {
+	while( soinf->ring_buf.available_read() <= sizeof(RingMessageHdr) ) {
+	}
+}
 	/*
 	Socket je bypass-ed. Ne smem iti recvfrom -> linux_recvfrom, ker utegne tam neskoncno dolgo viseti.
 	Ali pa morda tudi kak paket pozabi (ker preveckrat kilcem sbwait()?)
@@ -1002,6 +1021,9 @@ ssize_t recvmsg(int fd, struct msghdr *msg, int flags)
 
 ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
     const struct bsd_sockaddr *addr, socklen_t alen) {
+
+	//return len;
+
 	int error;
  	sock_info *soinf = sol_find(fd);
 	fprintf_pos(stderr, "fd=%d soinf=%p %d\n", fd, soinf, soinf?soinf->fd:-1);
@@ -1048,6 +1070,15 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	cc = peer_addr == my_ip_addr;
 	fprintf_pos(stderr, "DBG abc %d %d %d\n", aa, bb, cc); */
 	sock_info *soinf_peer = nullptr;
+	if(soinf->is_bypass) {
+		soinf_peer = sol_find_me(fd, peer_addr, peer_port);
+		if(!soinf_peer) {
+			fprintf_pos(stderr, "ERROR no valid peer found me/peer %d %d, soinf_peer=%p.\n", fd, peer_fd, soinf_peer);
+			return 0;
+		}
+		peer_fd = soinf_peer->fd;
+	}
+	else {
 	if ( (so_bypass_possible(soinf, soinf->my_port) ||
 		  so_bypass_possible(soinf, peer_port) ) &&
 		  (peer_addr == my_ip_addr)
@@ -1086,6 +1117,7 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 			fd, ntohl(soinf->my_addr), ntohs(soinf->my_port), ntohl(peer_addr), ntohs(peer_port));
 		return 0;
 	}
+	}
 
 
 
@@ -1120,6 +1152,7 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	size_t len2=0;
 	len2 = soinf_peer->data_push(buf, len);
 
+if (do_sbwait) {
 	/* bsd/sys/kern/uipc_syscalls.cc:608 +- eps */
 	struct file *fp;
 	struct socket *so;
@@ -1136,6 +1169,10 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	SOCK_UNLOCK(so);
 	fdrop(fp); /* TODO PAZI !!! */
 	return len2;
+}
+else {
+	return len2;
+}
 
 	/*
 	iz sbwait_tmo()
