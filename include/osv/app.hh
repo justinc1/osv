@@ -185,6 +185,7 @@ public:
     elf::program *program();
 private:
     void new_program();
+    void clone_osv_signal();
     void clone_osv_environ();
     void set_environ(const std::string &key, const std::string &value,
                      bool new_program);
@@ -213,6 +214,7 @@ private:
     mutex _termination_mutex;
     std::shared_ptr<elf::object> _lib;
     std::shared_ptr<elf::object> _libenviron;
+    std::shared_ptr<elf::object> _libsignal;
     main_func_t* _main;
     void (*_entry_point)();
     static app_registry apps;

@@ -940,6 +940,7 @@ libc =
 musl =
 environ_libc =
 environ_musl =
+signal_libc =
 
 ifeq ($(arch),x64)
 musl_arch = x86_64
@@ -1008,6 +1009,8 @@ environ_libc += env/secure_getenv.c
 environ_musl += env/putenv.c
 environ_musl += env/setenv.c
 environ_musl += env/unsetenv.c
+
+signal_libc += signal.cc
 
 musl += ctype/__ctype_b_loc.o
 
@@ -1867,10 +1870,14 @@ $(out)/bsd/%.o: COMMON += -DSMP -D'__FBSDID(__str__)=extern int __bogus__'
 
 environ_sources = $(addprefix libc/, $(environ_libc))
 environ_sources += $(addprefix musl/src/, $(environ_musl))
+signal_sources = $(addprefix libc/, $(signal_libc))
 
 $(out)/libenviron.so: $(environ_sources)
 	$(makedir)
 	 $(call quiet, $(CC) $(CFLAGS) -shared -o $(out)/libenviron.so $(environ_sources), CC libenviron.so)
+$(out)/libsignal.so: $(signal_sources)
+	$(makedir)
+	 $(call quiet, $(CXX) $(CXXFLAGS) -shared -o $(out)/libsignal.so $(signal_sources), CXX libsignal.so)
 
 bootfs_manifest ?= bootfs.manifest.skel
 
@@ -1884,7 +1891,7 @@ $(bootfs_manifest_dep): phony
 	fi
 
 $(out)/bootfs.bin: scripts/mkbootfs.py $(bootfs_manifest) $(bootfs_manifest_dep) $(tools:%=$(out)/%) \
-		$(out)/zpool.so $(out)/zfs.so $(out)/libenviron.so
+		$(out)/zpool.so $(out)/zfs.so $(out)/libenviron.so $(out)/libsignal.so
 	$(call quiet, olddir=`pwd`; cd $(out); $$olddir/scripts/mkbootfs.py -o bootfs.bin -d bootfs.bin.d -m $$olddir/$(bootfs_manifest) \
 		-D jdkbase=$(jdkbase) -D gccbase=$(gccbase) -D \
 		glibcbase=$(glibcbase) -D miscbase=$(miscbase), MKBOOTFS $@)

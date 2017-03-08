@@ -161,6 +161,7 @@ application::application(const std::string& command,
         if (new_program) {
             this->new_program();
             clone_osv_environ();
+            clone_osv_signal();
             current_program = _program.get();
         } else {
             // Do it in a separate branch because elf::get_program() would not
@@ -448,6 +449,15 @@ elf::program *application::program() {
     return _program.get();
 }
 
+
+void application::clone_osv_signal()
+{
+    _libsignal = _program->get_library("libsignal.so");
+    if (!_libsignal) {
+        abort("could not load libsignal.so\n");
+        return;
+    }
+}
 
 void application::clone_osv_environ()
 {
