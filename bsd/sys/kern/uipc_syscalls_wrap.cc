@@ -130,8 +130,8 @@ void RingBuffer::alloc(size_t len)
 size_t RingBuffer::available_read() {
 	size_t len;
 	len = wpos - rpos;
-	if (len<0)
-		len += length;
+	if (len > length) // unsigned data!
+		len = length - length;
 	return len;
 	assert(0 <= len);
 	assert(len <= length);
@@ -173,7 +173,8 @@ size_t RingBuffer::push(const void* buf, size_t len)
 }
 size_t RingBuffer::push_tcp(const void* buf, size_t len)
 {
-	while (len > available_write()) {
+	size_t writable_len;
+	while (len > (writable_len=available_write())) {
 		// drop packet
 		//return 0;
 		fprintf_pos(stderr, "RingBuffer::push delay\n", "");
@@ -209,7 +210,8 @@ size_t RingBuffer::push_udp(const void* buf, size_t len)
 size_t RingBuffer::pop_part(void* buf, size_t len)
 {
 	size_t rpos2, len1, len2;
-	assert(len <= available_read());
+	size_t readable_len;
+	assert(len <= (readable_len=available_read()));
 	assert(len <= length);
 	//size_t readable_len = available_read();
 	rpos2 = rpos + len;
@@ -418,7 +420,7 @@ sock_info* sol_find(int fd) {
 		[&] (sock_info *soinf) { return soinf && soinf->fd == fd; } );
 	if (it == so_list.end()) {
 		if(fd>5) {
-			fprintf_pos(stderr, "ERROR fd=%d not found\n", fd);
+			//fprintf_pos(stderr, "ERROR fd=%d not found\n", fd);
 		}
 		return nullptr;
 	}
@@ -470,7 +472,8 @@ bool so_bypass_possible(sock_info* soinf, ushort port) {
 	ushort pp;
 	pp = htons(port);
 	if ((3330 <= pp && pp <= 3340) || 
-		(5000 <= pp && pp <= 5010) ) {
+		(5000 <= pp && pp <= 5010) || // 5000 - iperf
+		(12860 <= pp && pp <= 12870) ) { // 16865 - netperf
 		do_bypass = true;
 	}
 	return do_bypass;
