@@ -15,6 +15,42 @@
 #include "osv/debug.hh"
 #include <boost/circular_buffer.hpp>
 #include <arpa/inet.h>  /* for sockaddr_in and inet_ntoa() */
+#include <osv/poll.h> // int poll_wake(struct file* fp, int events);
+
+
+// uipc_syscals.cc
+#include <sys/cdefs.h>
+
+#include <bsd/porting/netport.h>
+#include <bsd/uipc_syscalls.h>
+
+#include <fcntl.h>
+#include <osv/fcntl.h>
+#include <osv/ioctl.h>
+#include <errno.h>
+
+#include <bsd/sys/sys/param.h>
+#include <bsd/porting/synch.h>
+#include <osv/file.h>
+#include <osv/socket.hh>
+
+#include <bsd/sys/sys/mbuf.h>
+#include <bsd/sys/sys/protosw.h>
+#include <bsd/sys/sys/socket.h>
+#include <bsd/sys/sys/socketvar.h>
+#include <osv/uio.h>
+#include <bsd/sys/net/vnet.h>
+
+#include <memory>
+#include <fs/fs.hh>
+
+#include <osv/defer.hh>
+#include <osv/mempool.hh>
+#include <osv/pagealloc.hh>
+#include <osv/zcopy.hh>
+#include <sys/eventfd.h>
+int getsock_cap(int fd, struct file **fpp, u_int *fflagp);
+
 
 #if 1
 #  undef fprintf_pos
@@ -52,6 +88,27 @@ bool in_range(size_t val, size_t low, size_t high)
 	}
 }
 
+// return true if SBS_CANTRCVMORE in so->so_rcv.sb_state is set
+// use in poll-for-data loop to exit without data, when socet get closed while we are already waiting for data.
+bool check_sock_flags(int fd) {
+	int error;
+	bool cant_recv = false;
+	struct file *fp;
+	struct socket *so;
+	error = getsock_cap(fd, &fp, NULL);
+	if (error)
+		return (error);
+	so = (socket*)file_data(fp);
+	/* bsd/sys/kern/uipc_socket.cc:2425 */
+	SOCK_LOCK(so);
+	//
+	cant_recv = so->so_rcv.sb_state & SBS_CANTRCVMORE;
+	//
+	SOCK_UNLOCK(so);
+	fdrop(fp); /* TODO PAZI !!! */
+	return cant_recv;
+}
+
 class RingMessageHdr {
 public:
 	size_t length;
@@ -71,16 +128,16 @@ public:
 	~RingBuffer();
 	void alloc(size_t len);
 	size_t push(const void* buf, size_t len);
-	size_t pop(void* buf, size_t len);
+	size_t pop(void* buf, size_t len, int fd=-1);
 public:
 	size_t available_read();
 	size_t available_write();
 	size_t push_part(const void* buf, size_t len);
 	size_t push_udp(const void* buf, size_t len);
 	size_t push_tcp(const void* buf, size_t len);
-	size_t pop_part(void* buf, size_t len);
-	size_t pop_udp(void* buf, size_t len);
-	size_t pop_tcp(void* buf, size_t len);
+	size_t pop_part(void* buf, size_t len, int fd=-1);
+	size_t pop_udp(void* buf, size_t len, int fd=-1);
+	size_t pop_tcp(void* buf, size_t len, int fd=-1);
 public:
 	char* data;
 	size_t length;
@@ -207,7 +264,7 @@ size_t RingBuffer::push_udp(const void* buf, size_t len)
 	return len;
 }
 
-size_t RingBuffer::pop_part(void* buf, size_t len)
+size_t RingBuffer::pop_part(void* buf, size_t len, int fd)
 {
 	size_t rpos2, len1, len2;
 	size_t readable_len;
@@ -231,10 +288,10 @@ size_t RingBuffer::pop_part(void* buf, size_t len)
 	return len;
 }
 
-size_t RingBuffer::pop(void* buf, size_t len) {
-	return pop_tcp(buf, len);
+size_t RingBuffer::pop(void* buf, size_t len, int fd) {
+	return pop_tcp(buf, len, fd);
 }
-size_t RingBuffer::pop_tcp(void* buf, size_t len)
+size_t RingBuffer::pop_tcp(void* buf, size_t len, int fd)
 {
 	int cnt = 0;
 	size_t readable_len;
@@ -242,6 +299,16 @@ size_t RingBuffer::pop_tcp(void* buf, size_t len)
 		if(cnt==0)
 			fprintf_pos(stderr, "RingBuffer::pop delay cnt=%d readable_len=%d wpos=%d rpos=%d\n", cnt, (int)readable_len, wpos, rpos);
 		cnt++;
+		/*if(cnt==0) {
+			// wrap around, writer is slow, or socket was closed in between.
+			return 0;
+		}*/
+		if (fd != -1) {
+			if (check_sock_flags(fd)) {
+				// cantrecv is set, socket was closed while reading
+				return 0;
+			}
+		}
 		//usleep(1);
 	}
 		if(cnt>0)
@@ -250,7 +317,7 @@ size_t RingBuffer::pop_tcp(void* buf, size_t len)
 	return pop_part(buf, len);
 }
 
-size_t RingBuffer::pop_udp(void* buf, size_t len)
+size_t RingBuffer::pop_udp(void* buf, size_t len, int fd)
 {
 	RingMessageHdr hdr;
 	size_t readable_len;
@@ -286,7 +353,7 @@ public:
 	sock_info();
 	void bypass(uint32_t peer_addr=0xFFFFFFFF, ushort peer_port=0, int peer_fd=-1);
 	size_t data_push(const void* buf, size_t len);
-	size_t data_pop(void* buf, size_t len);
+	size_t data_pop(void* buf, size_t len, int fd=-1);
 public:
 	int fd;
 	bool is_bypass;
@@ -356,7 +423,7 @@ size_t sock_info::data_push(const void* buf, size_t len) {
 	return ring_buf.push(buf, len);
 }
 
-size_t sock_info::data_pop(void* buf, size_t len) {
+size_t sock_info::data_pop(void* buf, size_t len, int fd) {
 	/*while (in_buf.size() <= 0) {
 		// TODO atomicnost datagramov
 		usleep(1000*1200);
@@ -372,7 +439,7 @@ size_t sock_info::data_pop(void* buf, size_t len) {
 	}
 	return copy_len;
 	*/
-	return ring_buf.pop(buf, len);
+	return ring_buf.pop(buf, len, fd);
 }
 
 
@@ -476,6 +543,12 @@ bool so_bypass_possible(sock_info* soinf, ushort port) {
 		(12860 <= pp && pp <= 12870) ) { // 16865 - netperf
 		do_bypass = true;
 	}
+	pid_t tid = gettid();
+	if (248 <= tid && tid <= 300) {
+		// Briga me, na katerm port-u je. Samo da je dovolj visok TID,
+		// potem je to moj app - netserver oz netperf :/
+		do_bypass = true;
+	}
 	return do_bypass;
 }
 
@@ -493,6 +566,13 @@ bool soi_is_bypassed(sock_info* soinf) {
 	return soinf->is_bypass;
 }
 
+bool fd_is_bypassed(int fd) {
+	sock_info *soinf = sol_find(fd);
+	//fprintf_pos(stderr, "soinf=%p %d\n", soinf, soinf?soinf->fd:-1);
+	if (soinf==NULL)
+		return false;
+	return soinf->is_bypass;
+}
 
 //iperf crkne , ker select javi timeout :/   ??
 //glej Client.cpp Client::write_UDP_FIN
@@ -655,10 +735,27 @@ int bind(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		fprintf_pos(stderr, "ERROR fd=%d not found\n", fd);
 		return -1;
 	}
-	struct sockaddr_in* in_addr = (sockaddr_in*)(void*)addr;
+	struct sockaddr_in* in_addr;
+	in_addr = (sockaddr_in*)(void*)addr;
 	soinf->my_addr = in_addr->sin_addr.s_addr;
 	soinf->my_port = in_addr->sin_port;
-	fprintf_pos(stderr, "fd=%d me %d_0x%08x:%d\n", fd, fd, ntohl(soinf->my_addr), ntohs(soinf->my_port));
+	fprintf_pos(stderr, "fd=%d me (from input addr) %d_0x%08x:%d\n", fd, fd, ntohl(soinf->my_addr), ntohs(soinf->my_port));
+
+	struct bsd_sockaddr addr2;
+	socklen_t len2 = sizeof(addr2);
+	int ret;
+	memset(&addr2, 0x00, len2);
+	ret = getsockname(fd, &addr2, &len2);
+	if(ret) {
+		fprintf_pos(stderr, "ERROR fd=%d getsockname erro ret=%d\n", fd, ret);
+		return -1;
+	}
+	assert(len2 == sizeof(addr2));
+	in_addr = (sockaddr_in*)(void*)&addr2;
+	soinf->my_addr = in_addr->sin_addr.s_addr;
+	soinf->my_port = in_addr->sin_port;
+	fprintf_pos(stderr, "fd=%d me (from getsockname) %d_0x%08x:%d\n", fd, fd, ntohl(soinf->my_addr), ntohs(soinf->my_port));
+
 
 	// enable bypass for all server-side sockets.
 	// But not to early.
@@ -907,6 +1004,7 @@ int listen(int fd, int backlog)
 	int error;
 
 	sock_d("listen(fd=%d, backlog=%d)", fd, backlog);
+	fprintf_pos(stderr, "INFO listen fd=%d\n", fd);
 
 	error = linux_listen(fd, backlog);
 	if (error) {
@@ -918,38 +1016,6 @@ int listen(int fd, int backlog)
 	return 0;
 }
 
-// uipc_syscals.cc
-#include <sys/cdefs.h>
-
-#include <bsd/porting/netport.h>
-#include <bsd/uipc_syscalls.h>
-
-#include <fcntl.h>
-#include <osv/fcntl.h>
-#include <osv/ioctl.h>
-#include <errno.h>
-
-#include <bsd/sys/sys/param.h>
-#include <bsd/porting/synch.h>
-#include <osv/file.h>
-#include <osv/socket.hh>
-
-#include <bsd/sys/sys/mbuf.h>
-#include <bsd/sys/sys/protosw.h>
-#include <bsd/sys/sys/socket.h>
-#include <bsd/sys/sys/socketvar.h>
-#include <osv/uio.h>
-#include <bsd/sys/net/vnet.h>
-
-#include <memory>
-#include <fs/fs.hh>
-
-#include <osv/defer.hh>
-#include <osv/mempool.hh>
-#include <osv/pagealloc.hh>
-#include <osv/zcopy.hh>
-#include <sys/eventfd.h>
-int getsock_cap(int fd, struct file **fpp, u_int *fflagp);
 
 ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 {
@@ -979,6 +1045,7 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 	error = sbwait(so, &so->so_rcv);
 #endif
 
+	size_t available_read=0;
  	sock_info *soinf = sol_find(fd);
 	//fprintf_pos(stderr, "soinf=%p %d\n", soinf, soinf?soinf->fd:-1);
 	if (soinf==NULL || !soinf->is_bypass) {
@@ -989,8 +1056,9 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 	// ce sem od prejsnjega branja dobil dva pakate, potem sem dvakrat nastavil flag/event za sbwait.
 	// ampak sbwait() bo sedaj samo enkrat pocistil, 
 	// tako da, ce podatki so, potem jih beri brez sbwait() cakanja.
-if(do_sbwait) {
-	if( soinf->ring_buf.available_read() <= sizeof(RingMessageHdr) ) {
+
+	//if( soinf->ring_buf.available_read() <= sizeof(RingMessageHdr) ) { // za UDP, kjer imam header
+	if( soinf->ring_buf.available_read() <= 0 ) { // za TCP, kjer nimam headerja
 
 	/* bsd/sys/kern/uipc_syscalls.cc:608 +- eps */
 	int error;
@@ -1002,17 +1070,29 @@ if(do_sbwait) {
 	so = (socket*)file_data(fp);
 	/* bsd/sys/kern/uipc_socket.cc:2425 */
 	SOCK_LOCK(so);  // ce dam stran: Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
-	error = sbwait(so, &so->so_rcv);
+	// netperf naredi shutdown, potem pa hoce prebrati se preostanek podatkov.
+	if (so->so_rcv.sb_state & SBS_CANTRCVMORE == 0) { // TODO
+		error = sbwait(so, &so->so_rcv);
+	}
 	//error = sbwait(so, &so->so_rcv); /* se obesi, oz dobim samo vsak drugi paket... */
+	//
+	available_read = soinf->ring_buf.available_read();
+	fprintf_pos(stderr, "fd=%d so_state=0x%x so->so_rcv.sb_state=0x%x available_read=%d\n",
+		fd, so->so_state, so->so_rcv.sb_state, available_read);
+	// if (so->so_state == SS_ISDISCONNECTED) {
+	if (soinf->ring_buf.available_read() == 0 &&
+		so->so_rcv.sb_state & SBS_CANTRCVMORE) { // TODO
+		fprintf_pos(stderr, "fd=%d so_state=0x%x SS_ISDISCONNECTED  so->so_rcv.sb_state=0x%x SBS_CANTRCVMORE=0x%x\n", fd, so->so_state, so->so_rcv.sb_state, SBS_CANTRCVMORE);
+		//errno = ENOTCONN;
+		errno = EINTR; // to be netperf friendly
+		return -1; // -errno
+	}
+	//
 	SOCK_UNLOCK(so);
 	fdrop(fp); /* TODO PAZI !!! */
 	
 	}
-}
-else {
-	while( soinf->ring_buf.available_read() <= sizeof(RingMessageHdr) ) {
-	}
-}
+
 	/*
 	Socket je bypass-ed. Ne smem iti recvfrom -> linux_recvfrom, ker utegne tam neskoncno dolgo viseti.
 	Ali pa morda tudi kak paket pozabi (ker preveckrat kilcem sbwait()?)
@@ -1025,7 +1105,28 @@ else {
 		//fprintf_pos(stderr, "soinf=%p %d\n", soinf, soinf?soinf->fd:-1);
 		size_t len2;
 		//sleep(1);
-		len2 = soinf->data_pop(buf, len);
+		available_read = soinf->ring_buf.available_read();
+		fprintf_pos(stderr, "fd=%d available_read=%d\n", fd, available_read);
+		len2 = soinf->data_pop(buf, len, fd);
+		fprintf_pos(stderr, "fd=%d data_pop len2=%d\n", fd, len2);
+
+		int error;
+		struct file *fp;
+		struct socket *so;
+		error = getsock_cap(fd, &fp, NULL);
+		if (error)
+			return (error);
+		so = (socket*)file_data(fp);
+		/* bsd/sys/kern/uipc_socket.cc:2425 */
+		SOCK_LOCK(so);  // ce dam stran: Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
+		// via so->so_rcv.sb_cc does poll_scan -> socket_file::poll -> sopoll -> sopoll_generic -> sopoll_generic_locked 
+		// -> soreadabledata detects that there are readable data
+		so->so_rcv.sb_cc -= len2;
+
+		SOCK_UNLOCK(so);
+		fdrop(fp); /* TODO PAZI !!! */
+
+
 		return len2;
 	}
 
@@ -1042,8 +1143,8 @@ ssize_t recvfrom(int fd, void *__restrict buf, size_t len, int flags,
 	sock_d("recvfrom(fd=%d, buf=<uninit>, len=%d, flags=0x%x, ...)", fd,
 		len, flags);
  
-	ssize_t len2 = recvfrom_bypass(fd, buf, len);
-	if (len2)  {
+	if(fd_is_bypassed(fd)) {
+		ssize_t len2 = recvfrom_bypass(fd, buf, len);
 		return len2;
 	}
 
@@ -1105,8 +1206,8 @@ ssize_t recv(int fd, void *buf, size_t len, int flags)
 
 	sock_d("recv(fd=%d, buf=<uninit>, len=%d, flags=0x%x)", fd, len, flags);
 	
-	ssize_t len2 = recvfrom_bypass(fd, buf, len);
-	if (len2)  {
+	if(fd_is_bypassed(fd)) {
+		ssize_t len2 = recvfrom_bypass(fd, buf, len);
 		return len2;
 	}
 	
@@ -1130,8 +1231,8 @@ ssize_t recvmsg(int fd, struct msghdr *msg, int flags)
 
 	/*
 	buff to iovec
-	ssize_t len2 = recvfrom_bypass(fd, buf, len);
-	if (len2)  {
+	if(fd_is_bypassed(fd)) {
+		ssize_t len2 = recvfrom_bypass(fd, buf, len);
 		return len2;
 	}*/
 
@@ -1299,7 +1400,17 @@ if (do_sbwait) {
 	SOCK_LOCK(so);
 	//
 	//error = sbwait(so, &so->so_rcv);
+	// via so->so_rcv.sb_cc does poll_scan -> socket_file::poll -> sopoll -> sopoll_generic -> sopoll_generic_locked 
+	// -> soreadabledata detects that there are readable data
+	so->so_rcv.sb_cc += len2; // and so->so_rcv.sb_cc_wq wake_all ??
 	so->so_nc_wq.wake_all(SOCK_MTX_REF(so));
+	so->so_rcv.sb_cc_wq.wake_all(SOCK_MTX_REF(so));
+	//
+	// tole je pa za poll()
+	// a potem mogoce zgornjega so->so_nc_wq.wake_all vec ne rabim?
+	//	int poll_wake(struct file* fp, int events)
+	int events = 1; // recimo, da je 1 ok :/
+	poll_wake(fp, events);
 	//
 	SOCK_UNLOCK(so);
 	fdrop(fp); /* TODO PAZI !!! */
@@ -1498,6 +1609,47 @@ int setsockopt(int fd, int level, int optname, const void *optval, socklen_t opt
 	return 0;
 }
 
+void set_cantrecvanymore(int fd) {
+	// somehow, signal that bypassed socket is closed, so that the other side, trying to recv, will get a wake.
+	struct file *fp;
+	struct socket *so;
+	int error;
+	error = getsock_cap(fd, &fp, NULL); /* za tcp tu vec nimam pravega fd-ja :/ */
+	if (error) {
+		fprintf_pos(stderr, "fd=%d getsock_cap failed error=%d\n", fd, error);
+		return;
+	}
+	so = (socket*)file_data(fp);
+	/* bsd/sys/kern/uipc_socket.cc:2425 */
+	SOCK_LOCK(so);
+	//
+	//so->so_error = 1;
+	//so->so_state = SS_ ?;
+	fprintf_pos(stderr, "fd=%d old so_state=0x%x so->so_rcv.sb_flags=0x%x\n", fd, so->so_state, so->so_rcv.sb_flags);
+	//so->so_state = SS_ISDISCONNECTED;
+	//so->so_rcv.sb_flags;
+	socantrcvmore_locked(so); // da nastavi so->so_rcv.sb_flags;
+	fprintf_pos(stderr, "fd=%d new1 so_state=0x%x so->so_rcv.sb_flags=0x%x\n", fd, so->so_state, so->so_rcv.sb_flags);
+	//
+	so->so_nc_wq.wake_all(SOCK_MTX_REF(so));
+	so->so_rcv.sb_cc_wq.wake_all(SOCK_MTX_REF(so));
+	//so_peer->so_nc_wq.wake_all(*so_peer->so_mtx);
+	//so_peer->so_rcv.sb_cc_wq.wake_all(*so_peer->so_mtx);
+	//
+	// tole je pa za poll()
+	// a potem mogoce zgornjega so->so_nc_wq.wake_all vec ne rabim?
+	//	int poll_wake(struct file* fp, int events)
+	int events = 1; // recimo, da je 1 ok :/
+	poll_wake(fp, events);
+	//
+	SOCK_UNLOCK(so);
+	//
+	//socantrcvmore(so); // da nastavi so->so_rcv.sb_flags;
+	fprintf_pos(stderr, "fd=%d new2 so_state=0x%x so->so_rcv.sb_flags=0x%x\n", fd, so->so_state, so->so_rcv.sb_flags);
+	//
+	fdrop(fp); /* TODO PAZI !!! */
+}
+
 extern "C"
 int shutdown(int fd, int how)
 {
@@ -1521,6 +1673,34 @@ int shutdown(int fd, int how)
 		return -1;
 	}
 
+/*
+soreadabledata
+so_error
+so_state
+*/
+
+/*
+netperf zapre socket, potem pa proba prebrati se  zadnje ostanke.
+nastavi CANTRECVMORE flag, da ne bo netperf.so caka na branje is socketa, ki ga je sam zaprl.
+*/
+ 	sock_info *soinf = sol_find(fd);
+	fprintf_pos(stderr, "fd=%d soinf=%p %d\n", fd, soinf, soinf?soinf->fd:-1);
+	if(!soinf) {
+		return 0;
+	}
+	if(!soinf->is_bypass) {
+		return 0;
+	}
+	sock_info *soinf_peer = nullptr;
+	/* vsaj za tcp, bi to zdaj ze moral biti povezano*/
+	//int peer_fd = soinf->peer_fd;
+	soinf_peer = sol_find(soinf->peer_fd);
+	if(!soinf_peer->is_bypass) {
+		return 0;
+	}
+
+	set_cantrecvanymore(fd);
+	set_cantrecvanymore(soinf->peer_fd);
 	return 0;
 }
 

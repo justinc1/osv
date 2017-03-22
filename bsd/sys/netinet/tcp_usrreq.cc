@@ -231,6 +231,10 @@ tcp_usr_detach(struct socket *so)
 	struct inpcb *inp;
 
 	inp = sotoinpcb(so);
+	if (inp == NULL) {
+		fprintf_pos(stderr, "BUG inp==NULL, ignore\n", "");
+		//return;
+	}
 	KASSERT(inp != NULL, ("tcp_usr_detach: inp == NULL"));
 	INP_INFO_WLOCK(&V_tcbinfo);
 	INP_LOCK(inp);

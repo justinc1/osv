@@ -566,7 +566,7 @@ sofree(struct socket *so)
 	if (pr->pr_flags & PR_RIGHTS && pr->pr_domain->dom_dispose != NULL)
 		(*pr->pr_domain->dom_dispose)(so->so_rcv.sb_mb);
 	if (pr->pr_usrreqs->pru_detach != NULL)
-		(*pr->pr_usrreqs->pru_detach)(so);
+		(*pr->pr_usrreqs->pru_detach)(so); /* crkne, tcp_usr_detach */
 	so->so_mtx = nullptr;
 
 	/*
@@ -610,6 +610,8 @@ soclose(struct socket *so)
 	int error = 0;
 	uipc_d("soclose() so=%" PRIx64, (uint64_t)so);
 	KASSERT(!(so->so_state & SS_NOFDREF), ("soclose: SS_NOFDREF on enter"));
+
+	return 0; // avoid all errors on ip-bypasssed socket during close
 
 	CURVNET_SET(so->so_vnet);
 	if (so->so_state & SS_ISCONNECTED) {
@@ -705,6 +707,8 @@ soabort(struct socket *so)
 	if (so->so_proto->pr_usrreqs->pru_abort != NULL)
 		(*so->so_proto->pr_usrreqs->pru_abort)(so);
 	ACCEPT_LOCK();
+	// zdaj se pa zgodi, da je so->so_mtx == NULL :/
+	// No, sem "resil" tako, da preskocim ves soclose()
 	SOCK_LOCK(so);
 	sofree(so);
 }
@@ -3169,6 +3173,7 @@ sopoll(struct socket *so, int events, struct ucred *active_cred,
 	 * We do not need to set or assert curvnet as long as everyone uses
 	 * sopoll_generic().
 	 */
+    //fprintf_pos(stderr, "so=%p so->so_proto->pr_usrreqs->pru_sopoll=%p\n", so, so->so_proto->pr_usrreqs->pru_sopoll); // sopoll_generic
 	return (so->so_proto->pr_usrreqs->pru_sopoll(so, events, active_cred,
 	    td));
 }
@@ -3187,7 +3192,7 @@ sopoll_generic_locked(struct socket *so, int events)
 	int revents = 0;
 
 	if (events & (POLLIN | POLLRDNORM))
-		if (soreadabledata(so))
+		if (soreadabledata(so)) /* KAJ pa ce tega nastavim ?? */
 			revents |= events & (POLLIN | POLLRDNORM);
 
 	if (events & (POLLOUT | POLLWRNORM))

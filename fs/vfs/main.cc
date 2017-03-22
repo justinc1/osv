@@ -387,16 +387,15 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len);
 ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
     const struct bsd_sockaddr *addr, socklen_t alen);
 void sendto_bypass_part2(int fd);
-
+bool fd_is_bypassed(int fd);
 LFS64(pread);
 
 ssize_t read(int fd, void *buf, size_t count)
 {
-    sock_info* soinf = sol_find(fd);
     if(fd>2) {
         //fprintf_pos(stderr, "INFO read fd=%d\n", fd);
     }
-    if (soinf) {
+    if (fd_is_bypassed(fd)) {
         return recvfrom_bypass(fd, buf, count);
     }
     return pread(fd, buf, count, -1);
@@ -443,11 +442,9 @@ ssize_t write(int fd, const void *buf, size_t count) /**/
     if(fd>2) {
         //fprintf_pos(stderr, "INFO write fd=%d\n", fd);
     }
-    sock_info* soinf = sol_find(fd);
-    if (soinf) {
+    if(fd_is_bypassed(fd)) {
         ret = sendto_bypass(fd, buf, count, 0, nullptr, 0);
-        if(ret)
-            return ret;
+        return ret;
     }
     
     ret = pwrite(fd, buf, count, -1);
