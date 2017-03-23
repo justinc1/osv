@@ -337,6 +337,8 @@ static std::string read_file(std::string fn)
 }
 
 void ipbypass_setup();
+extern pid_t ipbypass_tid0;
+
 void* do_main_thread(void *_main_args)
 {
     auto main_args = static_cast<std::tuple<int,char**> *>(_main_args);
@@ -493,6 +495,10 @@ void* do_main_thread(void *_main_args)
         try {
             bool background = (suffix == "&") || (suffix == "&!");
             auto app = application::run(newvec);
+            if (newvec[0] == "/cli/cli.so") {
+                ipbypass_tid0 = app->get_main_thread_id() +1;
+                fprintf(stderr, "INFO ipbypass_tid0=%d\n", ipbypass_tid0);
+            }
             if (suffix == "&!") {
                 detached.push_back(app);
             } else if (!background) {

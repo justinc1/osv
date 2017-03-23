@@ -65,6 +65,7 @@ static mutex mtx_ipbypass;
 static mutex mtx_push_pop;
 
 #define BYPASS_BUF_SZ (1024*1024*30)
+pid_t ipbypass_tid0 = 1000000;;
 
 //#define my_memcpy memcpy
 #define my_memcpy memmove
@@ -650,9 +651,11 @@ bool so_bypass_possible(sock_info* soinf, ushort port) {
 		do_bypass = true;
 	}
 	pid_t tid = gettid();
-	if (248 <= tid && tid <= 300) {
+	if (ipbypass_tid0 <= tid && tid <= 300) {
 		// Briga me, na katerm port-u je. Samo da je dovolj visok TID,
 		// potem je to moj app - netserver oz netperf :/
+		// Naprej je bil netserver (oz prva via rest pognana app) na 248.
+		// Potem pa kar naenkrar na 216. Nic kar naenkrat - odvisno je od stevila CPUjev, pognal sem z -c2 :/
 		do_bypass = true;
 	}
 	return do_bypass;
