@@ -56,15 +56,24 @@ int getsock_cap(int fd, struct file **fpp, u_int *fflagp);
 #  undef fprintf_pos
 #  define fprintf_pos(...) /**/
 #endif
+#if 0
+#  undef assert
+#  define assert(...) /**/
+#endif
 
 #include <osv/mutex.h>
 #define IPBYPASS_LOCKED 0
+#define PUSH_LOCKED 0
+
 #if IPBYPASS_LOCKED
 static mutex mtx_ipbypass;
 #endif
-static mutex mtx_push_pop;
 
-#define BYPASS_BUF_SZ (1024*1024*30)
+#if PUSH_LOCKED
+static mutex mtx_push_pop;
+#endif
+
+#define BYPASS_BUF_SZ (1024*1024*4)
 pid_t ipbypass_tid0 = 1000000;;
 
 //#define my_memcpy memcpy
@@ -198,7 +207,9 @@ void RingBuffer::alloc(size_t len)
 
 size_t RingBuffer::available_read() {
 	size_t len;
+#if PUSH_LOCKED
 	SCOPE_LOCK(mtx_push_pop);
+#endif
 	assert(0 <= rpos);
 	assert(rpos < length);
 	assert(0 <= wpos);
@@ -239,7 +250,6 @@ size_t RingBuffer::available_write() {
 // limit max size - 2 kB
 size_t RingBuffer::push_part(const void* buf, size_t len)
 {
-	//SCOPE_LOCK(mtx_push_pop);
 	size_t wpos2, len1, len2;
 	size_t writable_len;
 	writable_len = available_write(); 
@@ -291,7 +301,10 @@ size_t RingBuffer::push_tcp(const void* buf, size_t len)
 			fprintf_pos(stderr, "RingBuffer::push delay\n", "");
 		}
 
-		WITH_LOCK(mtx_push_pop) {
+#if PUSH_LOCKED
+		WITH_LOCK(mtx_push_pop)
+#endif
+		{
 			writable_len=available_write();
 		}
 		// drop packet
@@ -299,7 +312,10 @@ size_t RingBuffer::push_tcp(const void* buf, size_t len)
 
 		//usleep(1);
 	}
-	WITH_LOCK(mtx_push_pop) {
+#if PUSH_LOCKED
+	WITH_LOCK(mtx_push_pop)
+#endif
+	{
 	assert(writable_len <= length);
 	assert(0 <= writable_len);
 	assert(len <= writable_len);
@@ -344,7 +360,6 @@ size_t RingBuffer::push_udp(const void* buf, size_t len)
 
 size_t RingBuffer::pop_part(void* buf, size_t len)
 {
-	//SCOPE_LOCK(mtx_push_pop);
 	size_t rpos2, len1, len2;
 	size_t readable_len;
 	readable_len = available_read();
@@ -394,7 +409,10 @@ size_t RingBuffer::pop_tcp(void* buf, size_t len, short *so_rcv_state)
 	int cnt = 0;
 	size_t readable_len = 0;
 	while (readable_len <= 0) {
-		WITH_LOCK(mtx_push_pop) {
+#if PUSH_LOCKED
+		WITH_LOCK(mtx_push_pop)
+#endif
+		{
 			readable_len = available_read();
 		}
 		if(cnt==0)
@@ -413,7 +431,10 @@ size_t RingBuffer::pop_tcp(void* buf, size_t len, short *so_rcv_state)
 		if(cnt>0)
 			fprintf_pos(stderr, "RingBuffer::pop delay cnt=%d readable_len=%d wpos=%d rpos=%d\n", cnt, (int)readable_len, wpos, rpos);
 	len = std::min(len, readable_len);
-	WITH_LOCK(mtx_push_pop) {
+#if PUSH_LOCKED
+	WITH_LOCK(mtx_push_pop)
+#endif
+	{
 		return pop_part(buf, len);
 	}
 }
