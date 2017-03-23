@@ -86,6 +86,7 @@ using namespace std;
 class sock_info;
 sock_info* sol_find(int fd);
 void sol_remove(int fd, int protocol);
+void sol_print(int fd);
 
 /*---------------------------------------------------------------------*/
 
@@ -246,7 +247,7 @@ int close(int fd)
         if (soinf) {
             fprintf_pos(stderr, "INFO close-ing socket fd=%d\n", fd);
             sol_remove(fd, -1);
-
+            sol_print(fd);
         }
     }
 

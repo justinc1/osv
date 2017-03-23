@@ -1760,6 +1760,36 @@ void set_cantrecvanymore(int fd) {
 	fdrop(fp); /* TODO PAZI !!! */
 }
 
+int sol_print(int fd)
+{
+	sock_info *soinf = sol_find(fd);
+	int peer_fd = -1;
+	fprintf_pos(stderr, "fd=%d soinf=%p %d\n", fd, soinf, soinf?soinf->fd:-1);
+	if(!soinf) {
+		fprintf(stderr, "INFO sock_info, fd=%d peer_fd=%d soinf==NULL\n",
+			fd, peer_fd);
+		return 0;
+	}
+	peer_fd = soinf->peer_fd;
+
+	fprintf(stderr, "INFO sock_info, fd=%d peer_fd=%d me   rpos_cum=%zu wpos_cum=%zu    DELTA=%zu\n",
+		fd, peer_fd,
+		soinf->ring_buf.rpos_cum, soinf->ring_buf.wpos_cum, soinf->ring_buf.wpos_cum - soinf->ring_buf.rpos_cum);
+	sock_info *soinf_peer = nullptr;
+	/* vsaj za tcp, bi to zdaj ze moral biti povezano*/
+	//int peer_fd = soinf->peer_fd;
+	soinf_peer = sol_find(soinf->peer_fd);
+	if(!soinf_peer) {
+		fprintf(stderr, "INFO sock_info, fd=%d peer_fd=%d soinf_peer==NULL\n",
+			fd, peer_fd);
+		return 0;
+	}
+	fprintf(stderr, "INFO sock_info, fd=%d peer_fd=%d peer rpos_cum=%zu wpos_cum=%zu    DELTA=%zu\n",
+		fd, peer_fd,
+		soinf_peer->ring_buf.rpos_cum, soinf_peer->ring_buf.wpos_cum, soinf_peer->ring_buf.wpos_cum - soinf_peer->ring_buf.rpos_cum);
+	return 0;
+}
+
 extern "C"
 int shutdown(int fd, int how)
 {
@@ -1768,6 +1798,7 @@ int shutdown(int fd, int how)
 	sock_d("shutdown(fd=%d, how=%d)", fd, how);
 	fprintf_pos(stderr, "fd=%d\n", fd);
 
+	sol_print(fd);
     sol_remove(fd, -1);
 
 	// Try first if it's a AF_LOCAL socket (af_local.cc), and if not
