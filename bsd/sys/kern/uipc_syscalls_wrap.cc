@@ -57,6 +57,13 @@ int getsock_cap(int fd, struct file **fpp, u_int *fflagp);
 #  define fprintf_pos(...) /**/
 #endif
 
+#include <osv/mutex.h>
+#define IPBYPASS_LOCKED 0
+#if IPBYPASS_LOCKED
+static mutex mtx_ipbypass;
+#endif
+static mutex mtx_push_pop;
+
 #define BYPASS_BUF_SZ (1024*1024*30)
 
 //#define my_memcpy memcpy
@@ -128,21 +135,23 @@ public:
 	~RingBuffer();
 	void alloc(size_t len);
 	size_t push(const void* buf, size_t len);
-	size_t pop(void* buf, size_t len, int fd=-1);
+	size_t pop(void* buf, size_t len, short *so_rcv_state=nullptr);
 public:
 	size_t available_read();
 	size_t available_write();
 	size_t push_part(const void* buf, size_t len);
 	size_t push_udp(const void* buf, size_t len);
 	size_t push_tcp(const void* buf, size_t len);
-	size_t pop_part(void* buf, size_t len, int fd=-1);
-	size_t pop_udp(void* buf, size_t len, int fd=-1);
-	size_t pop_tcp(void* buf, size_t len, int fd=-1);
+	size_t pop_part(void* buf, size_t len);
+	size_t pop_udp(void* buf, size_t len);
+	size_t pop_tcp(void* buf, size_t len, short *so_rcv_state=nullptr);
 public:
 	char* data;
 	size_t length;
 	volatile size_t rpos;
 	volatile size_t wpos;
+	size_t rpos_cum;
+	size_t wpos_cum;
 public:
 };
 
@@ -154,6 +163,8 @@ RingBuffer::RingBuffer()
 	length = 0;
 	rpos = 0;
 	wpos = 0;
+	rpos_cum = 0;
+	wpos_cum = 0;
 	// da ne bo cakanja na malloc v prvem recvfrom. Ce je sploh problem cakanje na malloc - mogoce samo IP-layer malo steka :/
 	//alloc(BYPASS_BUF_SZ);
 }
@@ -186,30 +197,60 @@ void RingBuffer::alloc(size_t len)
 
 size_t RingBuffer::available_read() {
 	size_t len;
-	len = wpos - rpos;
-	if (len > length) // unsigned data!
-		len = length - length;
-	return len;
+	SCOPE_LOCK(mtx_push_pop);
+	assert(0 <= rpos);
+	assert(rpos < length);
+	assert(0 <= wpos);
+	assert(wpos < length);
+
+	// test:
+	// rpos=0, wpos=0
+	// rpos=0, wpos=length
+	// rpos=70, wpos=80
+	// rpos=90, wpos=10, length=100
+	//
+	// size_t is unsigned
+	// rpos==wpos - poseben primer.
+	// Npr rpos=0, wpos=0; lahko je zacetno stanje, in available_read==0.
+	// Ali pa je write ze cel buffer napolnil, enkrat padel okrog, in available_read==lenght.
+	// Torej prepovem stanje, ko je buffer povsem poln; rpos==wpos pomeni, da je buffer povsem prazen.
+	if (rpos <= wpos) {
+		// rpos=70, wpos=80
+		len = wpos - rpos;
+	}
+	else {
+		// rpos=90, wpos=10, length=100
+		len = (length+wpos) - rpos;
+	}
 	assert(0 <= len);
-	assert(len <= length);
+	assert(len < length);
+	return len;
 }
 
 size_t RingBuffer::available_write() {
-	return length - available_read();
+	size_t len = length - available_read();
+	assert(0 <= len);
+	assert(len <= length); // to se dovolim. Ampak writer naj ne proba do konca napolniti.
+	return len;
 }
 
 // TODO push messages one-by-one
 // limit max size - 2 kB
 size_t RingBuffer::push_part(const void* buf, size_t len)
 {
+	//SCOPE_LOCK(mtx_push_pop);
 	size_t wpos2, len1, len2;
-	assert(len <= available_write());
-	if (len > available_write()) {
+	size_t writable_len;
+	writable_len = available_write(); 
+	assert(len < writable_len); // < - povsem poln buffer je prepovedan
+	assert(len <= length);
+	assert(0 <= len);
+	if (len > writable_len) {
 		// drop packet
 		return 0;
 	}
 	wpos2 = wpos + len;
-	if (wpos2 <= length) {
+	if (wpos2 < length) {
 		my_memcpy(data + wpos, buf, len);
 		// mbarrier
 		wpos = wpos2;
@@ -217,11 +258,22 @@ size_t RingBuffer::push_part(const void* buf, size_t len)
 	else {
 		len1 = length - wpos;
 		len2 = len - len1;
+		assert(len1 + len2 == len);
+		assert(len1 < length);
+		assert(len2 < length);
+		assert(wpos + len1 <= length);
 		my_memcpy(data + wpos, buf, len1);
 		my_memcpy(data, buf + len1, len2);
 		// mbarrier
 		wpos = len2;
 	}
+	wpos_cum += len;
+	assert(0 <= rpos);
+	assert(rpos < length);
+	assert(0 <= wpos);
+	assert(wpos < length);
+	assert(rpos_cum <= wpos_cum);
+	assert(wpos_cum - rpos_cum <= length); //**//
 	return len;
 }
 size_t RingBuffer::push(const void* buf, size_t len)
@@ -230,14 +282,39 @@ size_t RingBuffer::push(const void* buf, size_t len)
 }
 size_t RingBuffer::push_tcp(const void* buf, size_t len)
 {
-	size_t writable_len;
-	while (len > (writable_len=available_write())) {
+	size_t writable_len, len2;
+	size_t reserved_space = 10;
+	writable_len = 0;
+	while (len+reserved_space > writable_len) {
+		if(writable_len != 0) { // first loop
+			fprintf_pos(stderr, "RingBuffer::push delay\n", "");
+		}
+
+		WITH_LOCK(mtx_push_pop) {
+			writable_len=available_write();
+		}
 		// drop packet
 		//return 0;
-		fprintf_pos(stderr, "RingBuffer::push delay\n", "");
+
 		//usleep(1);
 	}
-	return push_part(buf, len);
+	WITH_LOCK(mtx_push_pop) {
+	assert(writable_len <= length);
+	assert(0 <= writable_len);
+	assert(len <= writable_len);
+	assert(0 <= len);
+
+	len2 = push_part(buf, len);
+
+	assert(wpos < length);
+	assert(0 <= wpos);
+	assert(rpos < length);
+	assert(0 <= rpos);
+	assert(rpos_cum <= wpos_cum);
+	assert(wpos_cum - rpos_cum <= length);
+	}
+
+	return len2;
 }
 size_t RingBuffer::push_udp(const void* buf, size_t len)
 {
@@ -264,15 +341,22 @@ size_t RingBuffer::push_udp(const void* buf, size_t len)
 	return len;
 }
 
-size_t RingBuffer::pop_part(void* buf, size_t len, int fd)
+size_t RingBuffer::pop_part(void* buf, size_t len)
 {
+	//SCOPE_LOCK(mtx_push_pop);
 	size_t rpos2, len1, len2;
 	size_t readable_len;
-	assert(len <= (readable_len=available_read()));
+	readable_len = available_read();
+
+	assert(readable_len <= length);
+	assert(0 <= readable_len);
+	assert(len <= readable_len); /* TODO fix */
+	assert(0 <= len);
 	assert(len <= length);
+
 	//size_t readable_len = available_read();
 	rpos2 = rpos + len;
-	if (rpos2 <= length) {
+	if (rpos2 < length) {
 		my_memcpy(buf, data + rpos, len);
 		// mbarrier
 		rpos = rpos2;
@@ -280,22 +364,38 @@ size_t RingBuffer::pop_part(void* buf, size_t len, int fd)
 	else {
 		len1 = length - rpos;
 		len2 = len - len1;
+		assert(len1 + len2 == len);
+		assert(len1 < length);
+		assert(len2 < length);
+		assert(rpos + len1 <= length);
 		my_memcpy(buf, data + rpos, len1);
 		my_memcpy(buf + len1, data, len2);
 		// mbarrier
 		rpos = len2;
 	}
+	rpos_cum += len;
+
+	assert(wpos < length);
+	assert(0 <= wpos);
+	assert(rpos < length);
+	assert(0 <= rpos);
+	assert(rpos_cum <= wpos_cum);
+	assert(wpos_cum - rpos_cum <= length);
+
 	return len;
 }
 
-size_t RingBuffer::pop(void* buf, size_t len, int fd) {
-	return pop_tcp(buf, len, fd);
+size_t RingBuffer::pop(void* buf, size_t len, short *so_rcv_state) {
+	return pop_tcp(buf, len, so_rcv_state);
 }
-size_t RingBuffer::pop_tcp(void* buf, size_t len, int fd)
+size_t RingBuffer::pop_tcp(void* buf, size_t len, short *so_rcv_state)
 {
 	int cnt = 0;
-	size_t readable_len;
-	while ((readable_len = available_read()) <= 0) {
+	size_t readable_len = 0;
+	while (readable_len <= 0) {
+		WITH_LOCK(mtx_push_pop) {
+			readable_len = available_read();
+		}
 		if(cnt==0)
 			fprintf_pos(stderr, "RingBuffer::pop delay cnt=%d readable_len=%d wpos=%d rpos=%d\n", cnt, (int)readable_len, wpos, rpos);
 		cnt++;
@@ -303,21 +403,21 @@ size_t RingBuffer::pop_tcp(void* buf, size_t len, int fd)
 			// wrap around, writer is slow, or socket was closed in between.
 			return 0;
 		}*/
-		if (fd != -1) {
-			if (check_sock_flags(fd)) {
-				// cantrecv is set, socket was closed while reading
-				return 0;
-			}
+		if (so_rcv_state && (*so_rcv_state & SBS_CANTRCVMORE)) {
+			// cantrecv is set, socket was closed while reading
+			return 0;
 		}
 		//usleep(1);
 	}
 		if(cnt>0)
 			fprintf_pos(stderr, "RingBuffer::pop delay cnt=%d readable_len=%d wpos=%d rpos=%d\n", cnt, (int)readable_len, wpos, rpos);
 	len = std::min(len, readable_len);
-	return pop_part(buf, len);
+	WITH_LOCK(mtx_push_pop) {
+		return pop_part(buf, len);
+	}
 }
 
-size_t RingBuffer::pop_udp(void* buf, size_t len, int fd)
+size_t RingBuffer::pop_udp(void* buf, size_t len)
 {
 	RingMessageHdr hdr;
 	size_t readable_len;
@@ -353,7 +453,7 @@ public:
 	sock_info();
 	void bypass(uint32_t peer_addr=0xFFFFFFFF, ushort peer_port=0, int peer_fd=-1);
 	size_t data_push(const void* buf, size_t len);
-	size_t data_pop(void* buf, size_t len, int fd=-1);
+	size_t data_pop(void* buf, size_t len, short *so_rcv_state=nullptr);
 public:
 	int fd;
 	bool is_bypass;
@@ -420,10 +520,13 @@ size_t sock_info::data_push(const void* buf, size_t len) {
 	}
 	return len;
 	*/
+#if IPBYPASS_LOCKED
+	SCOPE_LOCK(mtx_ipbypass);
+#endif
 	return ring_buf.push(buf, len);
 }
 
-size_t sock_info::data_pop(void* buf, size_t len, int fd) {
+size_t sock_info::data_pop(void* buf, size_t len, short *so_rcv_state) {
 	/*while (in_buf.size() <= 0) {
 		// TODO atomicnost datagramov
 		usleep(1000*1200);
@@ -439,7 +542,10 @@ size_t sock_info::data_pop(void* buf, size_t len, int fd) {
 	}
 	return copy_len;
 	*/
-	return ring_buf.pop(buf, len, fd);
+#if IPBYPASS_LOCKED
+	SCOPE_LOCK(mtx_ipbypass);
+#endif
+	return ring_buf.pop(buf, len, so_rcv_state);
 }
 
 
@@ -1058,38 +1164,40 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 	// tako da, ce podatki so, potem jih beri brez sbwait() cakanja.
 
 	//if( soinf->ring_buf.available_read() <= sizeof(RingMessageHdr) ) { // za UDP, kjer imam header
+	short *so_rcv_state = nullptr;
 	if( soinf->ring_buf.available_read() <= 0 ) { // za TCP, kjer nimam headerja
 
-	/* bsd/sys/kern/uipc_syscalls.cc:608 +- eps */
-	int error;
-	struct file *fp;
-	struct socket *so;
-	error = getsock_cap(fd, &fp, NULL);
-	if (error)
-		return (error);
-	so = (socket*)file_data(fp);
-	/* bsd/sys/kern/uipc_socket.cc:2425 */
-	SOCK_LOCK(so);  // ce dam stran: Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
-	// netperf naredi shutdown, potem pa hoce prebrati se preostanek podatkov.
-	if (so->so_rcv.sb_state & SBS_CANTRCVMORE == 0) { // TODO
-		error = sbwait(so, &so->so_rcv);
-	}
-	//error = sbwait(so, &so->so_rcv); /* se obesi, oz dobim samo vsak drugi paket... */
-	//
-	available_read = soinf->ring_buf.available_read();
-	fprintf_pos(stderr, "fd=%d so_state=0x%x so->so_rcv.sb_state=0x%x available_read=%d\n",
-		fd, so->so_state, so->so_rcv.sb_state, available_read);
-	// if (so->so_state == SS_ISDISCONNECTED) {
-	if (soinf->ring_buf.available_read() == 0 &&
-		so->so_rcv.sb_state & SBS_CANTRCVMORE) { // TODO
-		fprintf_pos(stderr, "fd=%d so_state=0x%x SS_ISDISCONNECTED  so->so_rcv.sb_state=0x%x SBS_CANTRCVMORE=0x%x\n", fd, so->so_state, so->so_rcv.sb_state, SBS_CANTRCVMORE);
-		//errno = ENOTCONN;
-		errno = EINTR; // to be netperf friendly
-		return -1; // -errno
-	}
-	//
-	SOCK_UNLOCK(so);
-	fdrop(fp); /* TODO PAZI !!! */
+		/* bsd/sys/kern/uipc_syscalls.cc:608 +- eps */
+		int error;
+		struct file *fp;
+		struct socket *so;
+		error = getsock_cap(fd, &fp, NULL);
+		if (error)
+			return (error);
+		so = (socket*)file_data(fp);
+		/* bsd/sys/kern/uipc_socket.cc:2425 */
+		SOCK_LOCK(so);  // ce dam stran: Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
+		// netperf naredi shutdown, potem pa hoce prebrati se preostanek podatkov.
+		so_rcv_state = &so->so_rcv.sb_state;
+		if (so->so_rcv.sb_state & SBS_CANTRCVMORE == 0) { // TODO
+			error = sbwait(so, &so->so_rcv);
+		}
+		//error = sbwait(so, &so->so_rcv); /* se obesi, oz dobim samo vsak drugi paket... */
+		//
+		available_read = soinf->ring_buf.available_read();
+		fprintf_pos(stderr, "fd=%d so_state=0x%x so->so_rcv.sb_state=0x%x available_read=%d\n",
+			fd, so->so_state, so->so_rcv.sb_state, available_read);
+		// if (so->so_state == SS_ISDISCONNECTED) {
+		if (soinf->ring_buf.available_read() == 0 &&
+			so->so_rcv.sb_state & SBS_CANTRCVMORE) { // TODO
+			fprintf_pos(stderr, "fd=%d so_state=0x%x SS_ISDISCONNECTED  so->so_rcv.sb_state=0x%x SBS_CANTRCVMORE=0x%x\n", fd, so->so_state, so->so_rcv.sb_state, SBS_CANTRCVMORE);
+			//errno = ENOTCONN;
+			errno = EINTR; // to be netperf friendly
+			return -1; // -errno
+		}
+		//
+		SOCK_UNLOCK(so);
+		fdrop(fp); /* TODO PAZI !!! */
 	
 	}
 
@@ -1107,7 +1215,8 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 		//sleep(1);
 		available_read = soinf->ring_buf.available_read();
 		fprintf_pos(stderr, "fd=%d available_read=%d\n", fd, available_read);
-		len2 = soinf->data_pop(buf, len, fd);
+		// so_rcv_state bo obcasno/pogosto nullptr
+		len2 = soinf->data_pop(buf, len, so_rcv_state);
 		fprintf_pos(stderr, "fd=%d data_pop len2=%d\n", fd, len2);
 
 		int error;
@@ -1403,12 +1512,13 @@ if (do_sbwait) {
 	// via so->so_rcv.sb_cc does poll_scan -> socket_file::poll -> sopoll -> sopoll_generic -> sopoll_generic_locked 
 	// -> soreadabledata detects that there are readable data
 	so->so_rcv.sb_cc += len2; // and so->so_rcv.sb_cc_wq wake_all ??
-	so->so_nc_wq.wake_all(SOCK_MTX_REF(so));
-	so->so_rcv.sb_cc_wq.wake_all(SOCK_MTX_REF(so));
+	//so->so_nc_wq.wake_all(SOCK_MTX_REF(so)); // tega lahko izpustim
+	so->so_rcv.sb_cc_wq.wake_all(SOCK_MTX_REF(so)); // ta mora biti
 	//
 	// tole je pa za poll()
 	// a potem mogoce zgornjega so->so_nc_wq.wake_all vec ne rabim?
 	//	int poll_wake(struct file* fp, int events)
+	// Tudi tega zdaj lahko izpustim? Ali pa ne, potem spet obvisi.
 	int events = 1; // recimo, da je 1 ok :/
 	poll_wake(fp, events);
 	//
