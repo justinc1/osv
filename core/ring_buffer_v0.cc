@@ -73,8 +73,6 @@ int getsock_cap(int fd, struct file **fpp, u_int *fflagp);
 static mutex mtx_push_pop;
 #endif
 
-#define BYPASS_BUF_SZ (1024*1024*4)
-
 //#define my_memcpy memcpy
 #define my_memcpy memmove
 //#define my_memcpy repmovsb 
@@ -446,5 +444,8 @@ size_t RingBufferV0::pop_udp(void* buf, size_t len)
 #endif
 
 /*--------------------------------------------------------------------------*/
+
+
+#include <lockfree/ring_buffer.hh>
 
 //class sock_info {

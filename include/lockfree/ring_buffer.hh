@@ -151,6 +151,11 @@ public:
         return (end - beg);
     }
 
+protected:
+    char* get_data() {
+        return _ring;
+    }
+
 private:
     std::atomic<unsigned> _begin CACHELINE_ALIGNED;
     std::atomic<unsigned> _end CACHELINE_ALIGNED;
