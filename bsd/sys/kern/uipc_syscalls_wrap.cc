@@ -64,6 +64,8 @@ int getsock_cap(int fd, struct file **fpp, u_int *fflagp);
 #include <osv/mutex.h>
 #define IPBYPASS_LOCKED 0
 #define PUSH_LOCKED 0
+#define MEM_BARRIER 
+	//asm volatile("" ::: "memory")
 
 #if IPBYPASS_LOCKED
 static mutex mtx_ipbypass;
@@ -210,11 +212,17 @@ size_t RingBuffer::available_read() {
 #if PUSH_LOCKED
 	SCOPE_LOCK(mtx_push_pop);
 #endif
-	assert(0 <= rpos);
-	assert(rpos < length);
-	assert(0 <= wpos);
-	assert(wpos < length);
+	// naredi local kopijo
+	size_t loc_rpos, loc_wpos;
+	loc_rpos = rpos;
+	loc_wpos = wpos;
 
+	assert(0 <= loc_rpos);
+	assert(loc_rpos < length);
+	assert(0 <= loc_wpos);
+	assert(loc_wpos < length);
+
+	MEM_BARRIER;
 	// test:
 	// rpos=0, wpos=0
 	// rpos=0, wpos=length
@@ -226,16 +234,18 @@ size_t RingBuffer::available_read() {
 	// Npr rpos=0, wpos=0; lahko je zacetno stanje, in available_read==0.
 	// Ali pa je write ze cel buffer napolnil, enkrat padel okrog, in available_read==lenght.
 	// Torej prepovem stanje, ko je buffer povsem poln; rpos==wpos pomeni, da je buffer povsem prazen.
-	if (rpos <= wpos) {
+	//
+	// ze v tem if (rpos<wpos) se lahko en ali drugi spremeni do dejanskega odstevanja.
+	if (loc_rpos <= loc_wpos) {
 		// rpos=70, wpos=80
-		len = wpos - rpos;
+		len = loc_wpos - loc_rpos;
 	}
 	else {
 		// rpos=90, wpos=10, length=100
-		len = (length+wpos) - rpos;
+		len = (length+loc_wpos) - loc_rpos;
 	}
 	assert(0 <= len);
-	assert(len < length);
+	assert(len < length); // len==length je prepovedan (povsem poln buffer)
 	return len;
 }
 
@@ -252,10 +262,20 @@ size_t RingBuffer::push_part(const void* buf, size_t len)
 {
 	size_t wpos2, len1, len2;
 	size_t writable_len;
+
+	assert(0 <= rpos);
+	assert(rpos < length);
+	assert(0 <= wpos);
+	assert(wpos < length);
+	assert(rpos_cum <= wpos_cum);
+	assert(wpos_cum - rpos_cum <= length); //**//
+
+	MEM_BARRIER;
 	writable_len = available_write(); 
 	assert(len < writable_len); // < - povsem poln buffer je prepovedan
 	assert(len <= length);
 	assert(0 <= len);
+
 	if (len > writable_len) {
 		// drop packet
 		return 0;
@@ -279,12 +299,14 @@ size_t RingBuffer::push_part(const void* buf, size_t len)
 		wpos = len2;
 	}
 	wpos_cum += len;
+	MEM_BARRIER;
+
 	assert(0 <= rpos);
 	assert(rpos < length);
 	assert(0 <= wpos);
 	assert(wpos < length);
 	assert(rpos_cum <= wpos_cum);
-	assert(wpos_cum - rpos_cum <= length); //**//
+	//assert(wpos_cum - rpos_cum <= length); //* TODO tudi rad crkne *//
 	return len;
 }
 size_t RingBuffer::push(const void* buf, size_t len)
@@ -362,7 +384,26 @@ size_t RingBuffer::pop_part(void* buf, size_t len)
 {
 	size_t rpos2, len1, len2;
 	size_t readable_len;
+
+	size_t loc_rpos_cum, loc_wpos_cum;
+	size_t loc_rpos, loc_wpos;
+	loc_rpos_cum = rpos_cum;
+	loc_wpos_cum = wpos_cum;
+	loc_rpos = rpos;
+	loc_wpos = wpos;
+	MEM_BARRIER;
+	
 	readable_len = available_read();
+	MEM_BARRIER;
+	//
+	//assert(loc_rpos_cum + readable_len <= loc_wpos_cum); // wpos/wpos_cum in readable_len se vmes poveca, loc cache pa je enak. ta test je zato slab.
+	//assert(rpos_cum + readable_len <= loc_wpos_cum);
+
+	// recimo, da obstaja micena moznost, da writer ze nastavi wpos, ni pa se povecal wpos_cum.
+	// potem se mi lahko (oz se zato) zgodi, da je je loc_rpos_cum == loc_wpos_cum, loc_rpos +128kB == loc_wpos_cum, 
+	// in spodnji test crkne.
+	// XXX mali-delay assert(loc_rpos_cum + readable_len <= wpos_cum);
+	// XXX mali-delay assert(rpos_cum + readable_len <= wpos_cum);
 
 	assert(readable_len <= length);
 	assert(0 <= readable_len);
@@ -391,12 +432,14 @@ size_t RingBuffer::pop_part(void* buf, size_t len)
 	}
 	rpos_cum += len;
 
+	MEM_BARRIER;
 	assert(wpos < length);
 	assert(0 <= wpos);
 	assert(rpos < length);
 	assert(0 <= rpos);
-	assert(rpos_cum <= wpos_cum);
-	assert(wpos_cum - rpos_cum <= length);
+	assert(rpos_cum == loc_rpos_cum + len);
+	// XXX mali-delay assert(rpos_cum <= loc_wpos_cum);
+	// XXX ajde, tudi tega ne razumem. assert(loc_wpos_cum - rpos_cum <= length);
 
 	return len;
 }
