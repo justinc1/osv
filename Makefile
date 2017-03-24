@@ -936,6 +936,8 @@ objects += core/libaio.o
 objects += core/osv_execve.o
 objects += core/osv_c_wrappers.o
 
+objects += core/ring_buffer_v0.o
+
 #include $(src)/libc/build.mk:
 libc =
 musl =
