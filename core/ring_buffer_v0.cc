@@ -90,10 +90,10 @@ bool in_range(size_t val, size_t low, size_t high)
 	}
 }
 
-RingBuffer::RingBuffer()
+RingBufferV0::RingBufferV0()
 {
 	data = nullptr;
-	fprintf_pos(stderr, "RingBuffer::RingBuffer this=%p data=%p at %p \n", this, data, &data);
+	fprintf_pos(stderr, "RingBufferV0::RingBufferV0 this=%p data=%p at %p \n", this, data, &data);
 	length = 0;
 	rpos = 0;
 	wpos = 0;
@@ -103,10 +103,10 @@ RingBuffer::RingBuffer()
 	//alloc(BYPASS_BUF_SZ);
 }
 
-RingBuffer::~RingBuffer()
+RingBufferV0::~RingBufferV0()
 {
 	if (data) {
-		fprintf_pos(stderr, "RingBuffer::~RingBuffer this=%p free-ing data=%p at %p \n", this, data, &data);
+		fprintf_pos(stderr, "RingBufferV0::~RingBufferV0 this=%p free-ing data=%p at %p \n", this, data, &data);
 		free(data);
 	}
 	data = nullptr;
@@ -115,21 +115,21 @@ RingBuffer::~RingBuffer()
 	wpos = 0;
 }
 
-void RingBuffer::alloc(size_t len)
+void RingBufferV0::alloc(size_t len)
 {
 	assert(data == nullptr);
 	assert(length == 0);
 	data = (char*)malloc(len);
 	if (!data)
 		return;
-	fprintf_pos(stderr, "RingBuffer::alloc this=%p data=%p at %p len=%d\n", this, data, &data, len);
+	fprintf_pos(stderr, "RingBufferV0::alloc this=%p data=%p at %p len=%d\n", this, data, &data, len);
 	memset(data, 0x11, len);
 	length = len;
 	rpos = 0;
 	wpos = 0;
 }
 
-size_t RingBuffer::available_read() {
+size_t RingBufferV0::available_read() {
 	size_t len;
 #if PUSH_LOCKED
 	SCOPE_LOCK(mtx_push_pop);
@@ -171,7 +171,7 @@ size_t RingBuffer::available_read() {
 	return len;
 }
 
-size_t RingBuffer::available_write() {
+size_t RingBufferV0::available_write() {
 	size_t len = length - available_read();
 	assert(0 <= len);
 	assert(len <= length); // to se dovolim. Ampak writer naj ne proba do konca napolniti.
@@ -180,7 +180,7 @@ size_t RingBuffer::available_write() {
 
 // TODO push messages one-by-one
 // limit max size - 2 kB
-size_t RingBuffer::push_part(const void* buf, size_t len)
+size_t RingBufferV0::push_part(const void* buf, size_t len)
 {
 	size_t wpos2, len1, len2;
 	size_t writable_len;
@@ -231,18 +231,18 @@ size_t RingBuffer::push_part(const void* buf, size_t len)
 	//assert(wpos_cum - rpos_cum <= length); //* TODO tudi rad crkne *//
 	return len;
 }
-size_t RingBuffer::push(const void* buf, size_t len)
+size_t RingBufferV0::push(const void* buf, size_t len)
 {
 	return push_tcp(buf, len);
 }
-size_t RingBuffer::push_tcp(const void* buf, size_t len)
+size_t RingBufferV0::push_tcp(const void* buf, size_t len)
 {
 	size_t writable_len, len2;
 	size_t reserved_space = 10;
 	writable_len = 0;
 	while (len+reserved_space > writable_len) {
 		if(writable_len != 0) { // first loop
-			fprintf_pos(stderr, "RingBuffer::push delay\n", "");
+			fprintf_pos(stderr, "RingBufferV0::push delay\n", "");
 		}
 
 #if PUSH_LOCKED
@@ -279,13 +279,13 @@ size_t RingBuffer::push_tcp(const void* buf, size_t len)
 }
 
 #if 0
-size_t RingBuffer::push_udp(const void* buf, size_t len)
+size_t RingBufferV0::push_udp(const void* buf, size_t len)
 {
 	RingMessageHdr hdr;
 	while (sizeof(hdr) + len > available_write()) {
 		// drop packet
 		//return 0;
-		fprintf_pos(stderr, "RingBuffer::push delay\n", "");
+		fprintf_pos(stderr, "RingBufferV0::push delay\n", "");
 		//usleep(1);
 	}
 	hdr.length = len;
@@ -305,7 +305,7 @@ size_t RingBuffer::push_udp(const void* buf, size_t len)
 }
 #endif
 
-size_t RingBuffer::pop_part(void* buf, size_t len)
+size_t RingBufferV0::pop_part(void* buf, size_t len)
 {
 	size_t rpos2, len1, len2;
 	size_t readable_len = 0;
@@ -376,10 +376,10 @@ size_t RingBuffer::pop_part(void* buf, size_t len)
 	return len;
 }
 
-size_t RingBuffer::pop(void* buf, size_t len, short *so_rcv_state) {
+size_t RingBufferV0::pop(void* buf, size_t len, short *so_rcv_state) {
 	return pop_tcp(buf, len, so_rcv_state);
 }
-size_t RingBuffer::pop_tcp(void* buf, size_t len, short *so_rcv_state)
+size_t RingBufferV0::pop_tcp(void* buf, size_t len, short *so_rcv_state)
 {
 	int cnt = 0;
 	size_t readable_len = 0;
@@ -391,7 +391,7 @@ size_t RingBuffer::pop_tcp(void* buf, size_t len, short *so_rcv_state)
 			readable_len = available_read();
 		}
 		if(cnt==0)
-			fprintf_pos(stderr, "RingBuffer::pop delay cnt=%d readable_len=%d wpos=%d rpos=%d\n", cnt, (int)readable_len, wpos, rpos);
+			fprintf_pos(stderr, "RingBufferV0::pop delay cnt=%d readable_len=%d wpos=%d rpos=%d\n", cnt, (int)readable_len, wpos, rpos);
 		cnt++;
 		/*if(cnt==0) {
 			// wrap around, writer is slow, or socket was closed in between.
@@ -404,7 +404,7 @@ size_t RingBuffer::pop_tcp(void* buf, size_t len, short *so_rcv_state)
 		//usleep(1);
 	}
 		if(cnt>0)
-			fprintf_pos(stderr, "RingBuffer::pop delay cnt=%d readable_len=%d wpos=%d rpos=%d\n", cnt, (int)readable_len, wpos, rpos);
+			fprintf_pos(stderr, "RingBufferV0::pop delay cnt=%d readable_len=%d wpos=%d rpos=%d\n", cnt, (int)readable_len, wpos, rpos);
 	len = std::min(len, readable_len);
 #if PUSH_LOCKED
 	WITH_LOCK(mtx_push_pop)
@@ -415,7 +415,7 @@ size_t RingBuffer::pop_tcp(void* buf, size_t len, short *so_rcv_state)
 }
 
 #if 0
-size_t RingBuffer::pop_udp(void* buf, size_t len)
+size_t RingBufferV0::pop_udp(void* buf, size_t len)
 {
 	RingMessageHdr hdr;
 	size_t readable_len;
@@ -423,24 +423,24 @@ size_t RingBuffer::pop_udp(void* buf, size_t len)
 		// no packet
 		return 0;
 	} */
-	//fprintf(stderr, "RingBuffer::pop\n");
+	//fprintf(stderr, "RingBufferV0::pop\n");
 	int cnt = 0;
 	// (sizeof(hdr)+1 -> assume all mesages are at least 1 B long.
 	// otehrwise, the assert(sizeof(hdr) + hdr.length <= readable_len); fails
 	while ((sizeof(hdr) + 1) > (readable_len = available_read())) {
 		if(cnt==0)
-			fprintf_pos(stderr, "RingBuffer::pop delay cnt=%d readable_len=%d wpos=%d rpos=%d\n", cnt, (int)readable_len, wpos, rpos);
+			fprintf_pos(stderr, "RingBufferV0::pop delay cnt=%d readable_len=%d wpos=%d rpos=%d\n", cnt, (int)readable_len, wpos, rpos);
 		cnt++;
 		//usleep(1);
 	}
 		if(cnt>0)
-			fprintf_pos(stderr, "RingBuffer::pop delay cnt=%d readable_len=%d wpos=%d rpos=%d\n", cnt, (int)readable_len, wpos, rpos);
+			fprintf_pos(stderr, "RingBufferV0::pop delay cnt=%d readable_len=%d wpos=%d rpos=%d\n", cnt, (int)readable_len, wpos, rpos);
 	//fprintf(stderr, "RingBuffer::pop-ing len=%d , rpos=%d, wpos=%d\n", len, rpos, wpos);
 	pop_part(&hdr, sizeof(hdr));
 	assert(sizeof(hdr) + hdr.length <= readable_len);
 	len = pop_part(buf, hdr.length);
 	assert(len == hdr.length);
-	//fprintf(stderr, "RingBuffer::pop-ed  len=%d , rpos=%d, wpos=%d\n", len, rpos, wpos);
+	//fprintf(stderr, "RingBufferV0::pop-ed  len=%d , rpos=%d, wpos=%d\n", len, rpos, wpos);
 	return hdr.length;
 }
 #endif

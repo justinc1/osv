@@ -63,6 +63,8 @@ int getsock_cap(int fd, struct file **fpp, u_int *fflagp);
 
 #include <osv/mutex.h>
 #include <osv/ring_buffer_v0.hh>
+#define RingBuffer RingBufferV0
+
 #define IPBYPASS_LOCKED 0
 #define MEM_BARRIER 
 	//asm volatile("" ::: "memory")

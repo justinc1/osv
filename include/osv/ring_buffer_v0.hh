@@ -15,10 +15,10 @@ public:
 	char* to_buffer() {return data;}
 };
 
-class RingBuffer {
+class RingBufferV0 {
 public:
-	RingBuffer();
-	~RingBuffer();
+	RingBufferV0();
+	~RingBufferV0();
 	void alloc(size_t len);
 	size_t push(const void* buf, size_t len);
 	size_t pop(void* buf, size_t len, short *so_rcv_state=nullptr);
