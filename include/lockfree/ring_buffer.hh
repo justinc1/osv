@@ -17,6 +17,9 @@
 #include <osv/ilog2.hh>
 #include <osv/debug.hh>
 
+#define ASSERT(...)
+//#define ASSERT(...) assert( __VA_ARGS__ )
+
 //
 // spsc ring of fixed size
 // intended to store stream of data (not pointer/reference to elements)
@@ -29,9 +32,15 @@ public:
         static_assert(is_power_of_two(MaxSize), "size must be a power of two");
     }
 
-    bool push(const void* buf, unsigned len)
+    unsigned push(const void* buf, unsigned len)
     {
         unsigned end = _end.load(std::memory_order_relaxed);
+        unsigned sz = size();
+        //unsigned end_masked = end & MaxSizeMask;
+        unsigned end2;
+        //unsigned end2_masked;
+
+        unsigned len2=0, len2_p1=0, len2_p2=0;
 
         //
         // It's ok to load _begin with relaxed ordering (in the size()) since
@@ -39,30 +48,68 @@ public:
         // control dependency (see Documentation/memory-barriers.txt in the
         // Linux tree).
         //
-        if (size() + len > MaxSize) {
-            return false;
-        }
+        // allow partial write
+        len2 = std::min(len, MaxSize - sz);
 
         //new (&_ring[end & MaxSizeMask]) T(std::forward<Args>(args)...);
         //TODO - split into two memcpy calls
-        memcpy(_ring + (end & MaxSizeMask), buf, len);
+        //memcpy(_ring + (end & MaxSizeMask), buf, len);
 
-        _end.store(end + len, std::memory_order_release);
+        end2 = end + len2;
+        if ((end2 & ~MaxSizeMask) == (end & ~MaxSizeMask)) {
+            // didn't wrap-around, high bits are equal
+            memcpy(_ring + (end & MaxSizeMask), buf, len2);
+        }
+        else {
+            len2_p1 = MaxSize - (end & MaxSizeMask);
+            len2_p2 = len2 - len2_p1;
+            ASSERT(len2_p1 + len2_p2 == len2);
+            ASSERT(len2_p1 < MaxSize);
+            ASSERT(len2_p2 < MaxSize);
+            ASSERT((end & MaxSizeMask) + len2_p1 <= MaxSize);
+            memcpy(_ring + (end & MaxSizeMask), buf, len2_p1);
+            memcpy(_ring, buf + len2_p1, len2_p2);
+        }
+        //wpos_cum += len;
 
-        return true;
+        _end.store(end + len2, std::memory_order_release);
+
+        return len2;
     }
 
-    bool pop(void* buf, unsigned len)
+    unsigned pop(void* buf, unsigned len)
     {
         unsigned beg = _begin.load(std::memory_order_relaxed);
+        unsigned sz = size();
+        //unsigned beg_masked = beg & MaxSizeMask;
+        unsigned beg2;
+        //unsigned beg2_masked;
 
-        if (empty()) {
-            return false;
-        }
+        unsigned len2=0, len2_p1=0, len2_p2=0;
+
+        // allow partial read
+        len2 = std::min(len, sz);
 
         //element = _ring[beg & MaxSizeMask];
         //TODO - split into two memcpy calls
-        memcpy(buf, _ring + (end & MaxSizeMask), len);
+        //memcpy(buf, _ring + (end & MaxSizeMask), len);
+
+        beg2 = beg + len2;
+        if ((beg2 & ~MaxSizeMask) == (beg & ~MaxSizeMask)) {
+            // didn't wrap-around, high bits are equal
+            memcpy(buf, _ring + (beg & MaxSizeMask), len2);
+        }
+        else {
+            len2_p1 = MaxSize - (beg & MaxSizeMask);
+            len2_p2 = len2 - len2_p1;
+            ASSERT(len2_p1 + len2_p2 == len2);
+            ASSERT(len2_p1 < MaxSize);
+            ASSERT(len2_p2 < MaxSize);
+            ASSERT((beg & MaxSizeMask) + len2_p1 <= MaxSize);
+            memcpy(buf, _ring + (beg & MaxSizeMask), len2_p1);
+            memcpy(buf + len2_p1, _ring, len2_p2);
+        }
+        //rpos_cum += len;
         
         //
         // Use "release" memory order to prevent the reordering of this store
@@ -72,9 +119,9 @@ public:
         // trash the element at index "_begin & MaxSizeMask" (when the ring is
         // full) with the new value before the load in this function occurs.
         //
-        _begin.store(beg + len, std::memory_order_release);
+        _begin.store(beg + len2, std::memory_order_release);
 
-        return true;
+        return len2;
     }
 
     /**
