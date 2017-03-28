@@ -1459,9 +1459,16 @@ int sol_print(int fd)
 	}
 	peer_fd = soinf->peer_fd;
 
-	fprintf(stderr, "INFO sock_info, fd=%d peer_fd=%d me   rpos_cum=%zu wpos_cum=%zu    DELTA=%zu\n",
+	size_t wpos_cum=0, rpos_cum=0;
+	size_t wpos_cum2=0, rpos_cum2=0;
+	wpos_cum = soinf->ring_buf.wpos_cum;
+	rpos_cum = soinf->ring_buf.rpos_cum;
+	wpos_cum2 = soinf->ring_buf.wpos_cum2.load();
+	rpos_cum2 = soinf->ring_buf.rpos_cum2.load();
+	fprintf(stderr, "INFO sock_info, fd=%d peer_fd=%d me   rpos_cum=%zu wpos_cum=%zu    DELTA=%zu (atomic %zu %zu    %zu)\n",
 		fd, peer_fd,
-		soinf->ring_buf.rpos_cum, soinf->ring_buf.wpos_cum, soinf->ring_buf.wpos_cum - soinf->ring_buf.rpos_cum);
+		rpos_cum, wpos_cum, wpos_cum - rpos_cum,
+		rpos_cum2, wpos_cum2, wpos_cum2 - rpos_cum2);
 	sock_info *soinf_peer = nullptr;
 	/* vsaj za tcp, bi to zdaj ze moral biti povezano*/
 	//int peer_fd = soinf->peer_fd;
@@ -1471,9 +1478,14 @@ int sol_print(int fd)
 			fd, peer_fd);
 		return 0;
 	}
-	fprintf(stderr, "INFO sock_info, fd=%d peer_fd=%d peer rpos_cum=%zu wpos_cum=%zu    DELTA=%zu\n",
+	wpos_cum = soinf_peer->ring_buf.wpos_cum;
+	rpos_cum = soinf_peer->ring_buf.rpos_cum;
+	wpos_cum2 = soinf_peer->ring_buf.wpos_cum2.load();
+	rpos_cum2 = soinf_peer->ring_buf.rpos_cum2.load();
+	fprintf(stderr, "INFO sock_info, fd=%d peer_fd=%d peer rpos_cum=%zu wpos_cum=%zu    DELTA=%zu (atomic %zu %zu    %zu)\n",
 		fd, peer_fd,
-		soinf_peer->ring_buf.rpos_cum, soinf_peer->ring_buf.wpos_cum, soinf_peer->ring_buf.wpos_cum - soinf_peer->ring_buf.rpos_cum);
+		rpos_cum, wpos_cum, wpos_cum - rpos_cum,
+		rpos_cum2, wpos_cum2, wpos_cum2 - rpos_cum2);
 	return 0;
 }
 
