@@ -838,6 +838,22 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 
 	//if( soinf->ring_buf.available_read() <= sizeof(RingMessageHdr) ) { // za UDP, kjer imam header
 	short *so_rcv_state = nullptr;
+	{
+		int error;
+		struct file *fp;
+		struct socket *so;
+		error = getsock_cap(fd, &fp, NULL);
+		if (error)
+			return (error);
+		so = (socket*)file_data(fp);
+		/* bsd/sys/kern/uipc_socket.cc:2425 */
+		SOCK_LOCK(so);  // ce dam stran: Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
+		// netperf naredi shutdown, potem pa hoce prebrati se preostanek podatkov.
+		so_rcv_state = &so->so_rcv.sb_state;
+		SOCK_UNLOCK(so);
+		fdrop(fp); /* TODO PAZI !!! */
+	}
+
 	if( soinf->ring_buf.available_read() <= 0 ) { // za TCP, kjer nimam headerja
 
 		/* bsd/sys/kern/uipc_syscalls.cc:608 +- eps */
@@ -851,7 +867,6 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 		/* bsd/sys/kern/uipc_socket.cc:2425 */
 		SOCK_LOCK(so);  // ce dam stran: Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
 		// netperf naredi shutdown, potem pa hoce prebrati se preostanek podatkov.
-		so_rcv_state = &so->so_rcv.sb_state;
 		if (so->so_rcv.sb_state & SBS_CANTRCVMORE == 0) { // TODO
 			error = sbwait(so, &so->so_rcv);
 		}
@@ -888,7 +903,6 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 		//sleep(1);
 		available_read = soinf->ring_buf.available_read();
 		fprintf_pos(stderr, "fd=%d available_read=%d\n", fd, available_read);
-		// so_rcv_state bo obcasno/pogosto nullptr
 		len2 = soinf->data_pop(buf, len, so_rcv_state);
 		fprintf_pos(stderr, "fd=%d data_pop len2=%d\n", fd, len2);
 
