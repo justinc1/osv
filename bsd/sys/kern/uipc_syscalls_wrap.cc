@@ -82,7 +82,6 @@ pid_t ipbypass_tid0 = 1000000;;
 // TODO TRY repmovsb 
 
 uint32_t my_ip_addr = 0x00000000;
-bool do_sbwait = true;
 // all sockets
 class sock_info;
 std::vector<sock_info*> so_list;
@@ -660,12 +659,9 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 			// oz kdor ima mene za peer-a, tistega bom jaz imel za peer-a.
 			soinf_peer = sol_find_peer2(fd, soinf->my_addr, soinf->my_port);
 		}
-		
 		assert(soinf_peer != nullptr); // ali pa implementiraj se varianto "najprej client, potem server"
-		
-		if (soinf_peer) {
-			peer_fd = soinf_peer->fd;
-		}
+
+		peer_fd = soinf_peer->fd;
 		fprintf_pos(stderr, "INFO connect fd=%d me %d_0x%08x:%d peer %d_0x%08x:%d try to bypass\n", 
 			fd, fd, ntohl(soinf->my_addr), ntohs(soinf->my_port),
 			peer_fd, ntohl(peer_addr), ntohs(peer_port));
@@ -827,9 +823,7 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 	size_t available_read=0;
  	sock_info *soinf = sol_find(fd);
 	//fprintf_pos(stderr, "soinf=%p %d\n", soinf, soinf?soinf->fd:-1);
-	if (soinf==NULL || !soinf->is_bypass) {
-		return 0;
-	}
+	assert(soinf && soinf->is_bypass);
 	fprintf_pos(stderr, "fd=%d BYPASS-ed\n", fd);
 
 	// ce sem od prejsnjega branja dobil dva pakate, potem sem dvakrat nastavil flag/event za sbwait.
@@ -838,39 +832,27 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 
 	//if( soinf->ring_buf.available_read() <= sizeof(RingMessageHdr) ) { // za UDP, kjer imam header
 	short *so_rcv_state = nullptr;
-	{
-		int error;
-		struct file *fp;
-		struct socket *so;
-		error = getsock_cap(fd, &fp, NULL);
-		if (error)
-			return (error);
-		so = (socket*)file_data(fp);
-		/* bsd/sys/kern/uipc_socket.cc:2425 */
-		SOCK_LOCK(so);  // ce dam stran: Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
-		// netperf naredi shutdown, potem pa hoce prebrati se preostanek podatkov.
-		so_rcv_state = &so->so_rcv.sb_state;
-		SOCK_UNLOCK(so);
-		fdrop(fp); /* TODO PAZI !!! */
-	}
+	int error;
+	struct file *fp;
+	struct socket *so;
+	error = getsock_cap(fd, &fp, NULL);
+	if (error)
+		return (error);
+	so = (socket*)file_data(fp);
+	/* bsd/sys/kern/uipc_socket.cc:2425 */
+	SOCK_LOCK(so);  // ce dam stran: Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
+	// netperf naredi shutdown, potem pa hoce prebrati se preostanek podatkov.
+	//
+	so_rcv_state = &so->so_rcv.sb_state;
 
 	if( soinf->ring_buf.available_read() <= 0 ) { // za TCP, kjer nimam headerja
 
 		/* bsd/sys/kern/uipc_syscalls.cc:608 +- eps */
-		int error;
-		struct file *fp;
-		struct socket *so;
-		error = getsock_cap(fd, &fp, NULL);
-		if (error)
-			return (error);
-		so = (socket*)file_data(fp);
-		/* bsd/sys/kern/uipc_socket.cc:2425 */
-		SOCK_LOCK(so);  // ce dam stran: Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
+		//SOCK_LOCK(so);  // ce dam stran: Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
 		// netperf naredi shutdown, potem pa hoce prebrati se preostanek podatkov.
 		if (so->so_rcv.sb_state & SBS_CANTRCVMORE == 0) { // TODO
 			error = sbwait(so, &so->so_rcv);
 		}
-		//error = sbwait(so, &so->so_rcv); /* se obesi, oz dobim samo vsak drugi paket... */
 		//
 		available_read = soinf->ring_buf.available_read();
 		fprintf_pos(stderr, "fd=%d so_state=0x%x so->so_rcv.sb_state=0x%x available_read=%d\n",
@@ -881,12 +863,10 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 			fprintf_pos(stderr, "fd=%d so_state=0x%x SS_ISDISCONNECTED  so->so_rcv.sb_state=0x%x SBS_CANTRCVMORE=0x%x\n", fd, so->so_state, so->so_rcv.sb_state, SBS_CANTRCVMORE);
 			//errno = ENOTCONN;
 			errno = EINTR; // to be netperf friendly
+			SOCK_UNLOCK(so);
+			fdrop(fp); /* TODO PAZI !!! */
 			return -1; // -errno
 		}
-		//
-		SOCK_UNLOCK(so);
-		fdrop(fp); /* TODO PAZI !!! */
-	
 	}
 
 	/*
@@ -895,38 +875,25 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 	Torej bom kar probal cakati na podatke ;?>
 
 	to mi bo morda spet zj... iperf :/
-	*/
 	// if (soinf->ring_buf.available_read() > sizeof(RingMessageHdr))
-	{
-		//fprintf_pos(stderr, "soinf=%p %d\n", soinf, soinf?soinf->fd:-1);
-		size_t len2;
-		//sleep(1);
-		available_read = soinf->ring_buf.available_read();
-		fprintf_pos(stderr, "fd=%d available_read=%d\n", fd, available_read);
-		len2 = soinf->data_pop(buf, len, so_rcv_state);
-		fprintf_pos(stderr, "fd=%d data_pop len2=%d\n", fd, len2);
+	*/
+	size_t len2;
+	//sleep(1);
+	available_read = soinf->ring_buf.available_read();
+	fprintf_pos(stderr, "fd=%d available_read=%d\n", fd, available_read);
+	SOCK_UNLOCK(so); // ker data_pop caka na podatke
+	len2 = soinf->data_pop(buf, len, so_rcv_state);
+	fprintf_pos(stderr, "fd=%d data_pop len2=%d\n", fd, len2);
 
-		int error;
-		struct file *fp;
-		struct socket *so;
-		error = getsock_cap(fd, &fp, NULL);
-		if (error)
-			return (error);
-		so = (socket*)file_data(fp);
-		/* bsd/sys/kern/uipc_socket.cc:2425 */
-		SOCK_LOCK(so);  // ce dam stran: Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
-		// via so->so_rcv.sb_cc does poll_scan -> socket_file::poll -> sopoll -> sopoll_generic -> sopoll_generic_locked 
-		// -> soreadabledata detects that there are readable data
-		so->so_rcv.sb_cc -= len2;
+	SOCK_LOCK(so);  // ce dam stran: Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
+	// via so->so_rcv.sb_cc does poll_scan -> socket_file::poll -> sopoll -> sopoll_generic -> sopoll_generic_locked 
+	// -> soreadabledata detects that there are readable data
+	so->so_rcv.sb_cc -= len2; // a treba imeti so locked ?
 
-		SOCK_UNLOCK(so);
-		fdrop(fp); /* TODO PAZI !!! */
+	SOCK_UNLOCK(so);
+	fdrop(fp); /* TODO PAZI !!! */
 
-
-		return len2;
-	}
-
-	return 0;
+	return len2;
 }
 
 extern "C"
@@ -952,45 +919,6 @@ ssize_t recvfrom(int fd, void *__restrict buf, size_t len, int flags,
 		return -1;
 	}
 
-#if 0
-	// try to enable bypass after first received packet
- 	sock_info *soinf = sol_find(fd);
-	if(!soinf) {
-		return bytes;
-	}
-	struct sockaddr_in* in_addr = (sockaddr_in*)(void*)addr;
-	uint32_t peer_addr = in_addr->sin_addr.s_addr;
-	ushort peer_port = in_addr->sin_port;
-	fprintf_pos(stderr, "INFO fd=%d me 0x%08x:%d, peer 0x%08x:%d\n", fd, ntohl(soinf->my_addr), ntohs(soinf->my_port), ntohl(peer_addr), ntohs(peer_port));
-	//
-	// and enable for peer too.
-	// But peer didn't save its port and addr :/
-	// So I should search fore someone who has me as peer ?? mess mess mess
- 	sock_info *peer_soinf = nullptr;
- 	//peer_soinf = sol_find_peer2(fd, peer_addr, peer_port);
- 	peer_soinf = sol_find_peer2(fd, soinf->my_addr, soinf->my_port); // search for socket, which is sending to me.
-	fprintf_pos(stderr, "INFO fd=%d peer_soinf=%p %d_0x%08x:%d \n", fd, peer_soinf, peer_soinf->fd, ntohl(peer_addr), ntohs(peer_port));
-
- 	//
-	if(!peer_soinf) {
-		return bytes; //TODO_tole?
-	}
-	bool bypass_possible_me, bypass_possible_peer; 
-	bypass_possible_me = so_bypass_possible(nullptr, soinf->my_port);
-	bypass_possible_peer = so_bypass_possible(nullptr, peer_port);
-	fprintf_pos(stderr, "INFO fd=%d bypass_possible me %d, peer %d\n", fd, bypass_possible_me, bypass_possible_peer);
-	if (bypass_possible_me || bypass_possible_peer) {
-		fprintf_pos(stderr, "INFO fd=%d me=0x%08x:%d peer 0x%08x:%d try to bypass\n", 
-			fd, ntohl(soinf->my_addr), ntohs(soinf->my_port), ntohl(peer_addr), ntohs(peer_port));
-		soinf->bypass(peer_addr, peer_port, peer_soinf->fd);
-		//peer_soinf->bypass(peer_addr, peer_port);
-		peer_soinf->bypass(0x00000000, soinf->my_port, fd); // ANY addr, ali pa -1, ali pa kar peer_addr, saj je enak - ista VM
-	}
-	else {
-		fprintf_pos(stderr, "INFO fd=%d me=0x%08x:%d peer 0x%08x:%d bypass not possible\n", 
-			fd, ntohl(soinf->my_addr), ntohs(soinf->my_port), ntohl(peer_addr), ntohs(peer_port));
-	}
-#endif
 	return bytes;
 }
 
@@ -1053,13 +981,6 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	if(!soinf) {
 		return 0;
 	}
-	//usleep(200*1000);
-
-	// no, zdaj pa bom morda bypass omogocil ob prvem poslanem paketu
-	/*
-	if (!soinf->is_bypass) {
-		return 0;
-	}*/
 
 	uint32_t peer_addr = 0xFFFFFFFF;
 	ushort peer_port = 0;
@@ -1075,9 +996,7 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 		peer_port = soinf->peer_port;
 	}
 
-	if (peer_addr == 0xFFFFFFFF && peer_port == 0) {
-		return 0;
-	}
+	assert(peer_addr != 0xFFFFFFFF && peer_port != 0);
 	// OK, peer seems to be known and our.
 
 	fprintf_pos(stderr, "fd=%d connecting to peer_addr=0x%08x peer_port=%d\n", fd, ntohl(peer_addr), ntohs(peer_port));
@@ -1094,60 +1013,19 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	cc = peer_addr == my_ip_addr;
 	fprintf_pos(stderr, "DBG abc %d %d %d\n", aa, bb, cc); */
 	sock_info *soinf_peer = nullptr;
-	if(soinf->is_bypass) {
-		/* vsaj za tcp, bi to zdaj ze moral biti povezano*/
-		peer_fd = soinf->peer_fd;
-		soinf_peer = sol_find(soinf->peer_fd);
+	assert(soinf->is_bypass);
+	/* vsaj za tcp, bi to zdaj ze moral biti povezano*/
+	peer_fd = soinf->peer_fd;
+	soinf_peer = sol_find(soinf->peer_fd);
+	assert(soinf_peer && soinf_peer->is_bypass);
 
-		// tole je bilo za udp
-		/* soinf_peer = sol_find_me(fd, peer_addr, peer_port);
-		if(!soinf_peer) {
-			fprintf_pos(stderr, "ERROR no valid peer found me/peer %d %d, soinf_peer=%p.\n", fd, peer_fd, soinf_peer);
-			return 0;
-		}
-		peer_fd = soinf_peer->fd; */
-	}
-	else {
-	if ( (so_bypass_possible(soinf, soinf->my_port) ||
-		  so_bypass_possible(soinf, peer_port) ) &&
-		  (peer_addr == my_ip_addr)
-	   ) {
-		// peer socket je ze odprt, ali pa tudi se ni.
-		// tako da peer_fd bom nasel, ali pa tudi ne.
-		// TODO
-		// ce peer-a se ni, ga bom moral iskati po vsakem recvmsg ??
-		//soinf_peer = sol_find_peer2(fd, peer_addr, peer_port);
-		// No, dajmo iskati vse 'moje' sockete, ki poslusajo na peer_port.
-		// Na njih posiljam, oni so moj peer.
-		soinf_peer = sol_find_me(fd, peer_addr, peer_port);
-
-		// assert(soinf_peer != nullptr); // ali pa implementiraj se varianto "najprej client, potem server"
-		if (soinf_peer) {
-			peer_fd = soinf_peer->fd;
-		}
-		else {
-			// peer_fd je se vedno -1, in ne morem poslati.
-			// se zgodi, ko iperf server zapre svoj port, in client se vedno probova poslati
-			fprintf_pos(stderr, "ERROR no valid peer found me/peer %d %d, soinf_peer=%p.\n", fd, peer_fd, soinf_peer);
-			return 0;
-		}
-		fprintf_pos(stderr, "INFO fd=%d me %d_0x%08x:%d peer %d_0x%08x:%d try to bypass\n", 
-			fd, fd, ntohl(soinf->my_addr), ntohs(soinf->my_port),
-			peer_fd, ntohl(peer_addr), ntohs(peer_port));
-		if(soinf->is_bypass) {
-			fprintf_pos(stderr, "INFO already bypass-ed fd me/peer %d %d.\n", fd, peer_fd);
-		}
-		else {
-			soinf->bypass(peer_addr, peer_port, peer_fd);
-		}
-	}
-	else {
-		fprintf_pos(stderr, "INFO fd=%d me=0x%08x:%d peer 0x%08x:%d bypass not possible\n", 
-			fd, ntohl(soinf->my_addr), ntohs(soinf->my_port), ntohl(peer_addr), ntohs(peer_port));
+	// tole je bilo za udp
+	/* soinf_peer = sol_find_me(fd, peer_addr, peer_port);
+	if(!soinf_peer) {
+		fprintf_pos(stderr, "ERROR no valid peer found me/peer %d %d, soinf_peer=%p.\n", fd, peer_fd, soinf_peer);
 		return 0;
 	}
-	}
-
+	peer_fd = soinf_peer->fd; */
 	fprintf_pos(stderr, "INFO fd=%d peer %d_0x%08x:%d <-> %d_0x%08x:%d\n", fd, 
 		soinf_peer->fd, ntohl(soinf_peer->my_addr), ntohs(soinf_peer->my_port),
 		soinf_peer->peer_fd, ntohl(soinf_peer->peer_addr), ntohs(soinf_peer->peer_port));
@@ -1184,7 +1062,6 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	len2 = soinf_peer->data_push(buf, len);
 	//sleep(1);
 
-if (do_sbwait) {
 	/* bsd/sys/kern/uipc_syscalls.cc:608 +- eps */
 	struct file *fp;
 	struct socket *so;
@@ -1212,10 +1089,6 @@ if (do_sbwait) {
 	SOCK_UNLOCK(so);
 	fdrop(fp); /* TODO PAZI !!! */
 	return len2;
-}
-else {
-	return len2;
-}
 
 	/*
 	iz sbwait_tmo()
@@ -1224,37 +1097,6 @@ else {
 	so->so_nc_wq.wake_all(SOCK_MTX_REF(so));
 	*/
 }
-
-/*
-// save peer addr/port just after first send
-void sendto_bypass_part2(int fd)
-{
-	// try to enable bypass after first sent packet
-	// NO, receiver might not be up yet.
-	// So, receiver should enable bypass for sender, after he gets first packet.
-	// Here, just save peer addr/port - so that we get "connected" like
-	sock_info *soinf = sol_find(fd);
-	//fprintf_pos(stderr, "soinf=%p %d\n", soinf, soinf?soinf->fd:-1);
-	if(!soinf) {
-		return;
-	}
-	uint32_t peer_addr = soinf->peer_addr;
-	ushort peer_port = soinf->peer_port;
-	fprintf_pos(stderr, "INFO fd=%d peer addr=0x%08x,port=%d\n", fd, ntohl(peer_addr), ntohs(peer_port));
-	if (so_bypass_possible(soinf, soinf->my_port) ||
-		so_bypass_possible(soinf, peer_port)) {
-		fprintf_pos(stderr, "INFO fd=%d me=0x%08x:%d peer 0x%08x:%d try to bypass\n", 
-			fd, ntohl(soinf->my_addr), ntohs(soinf->my_port), ntohl(peer_addr), ntohs(peer_port));
-		//soinf->bypass(peer_addr, peer_port);
-		soinf->peer_addr = peer_addr;
-		soinf->peer_port = peer_port;
-	}
-	else {
-		fprintf_pos(stderr, "INFO fd=%d me=0x%08x:%d peer 0x%08x:%d bypass not possible\n", 
-			fd, ntohl(soinf->my_addr), ntohs(soinf->my_port), ntohl(peer_addr), ntohs(peer_port));
-	}
-	//soinf->bypass();
-}*/
 
 extern "C"
 ssize_t sendto(int fd, const void *buf, size_t len, int flags,
