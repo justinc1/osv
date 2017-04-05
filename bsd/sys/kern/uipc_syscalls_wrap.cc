@@ -840,30 +840,33 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 		return (error);
 	so = (socket*)file_data(fp);
 	/* bsd/sys/kern/uipc_socket.cc:2425 */
-	SOCK_LOCK(so);  // ce dam stran: Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
+	//SOCK_LOCK(so);  // ce dam stran: Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
 	// netperf naredi shutdown, potem pa hoce prebrati se preostanek podatkov.
 	//
 	so_rcv_state = &so->so_rcv.sb_state;
+	//SOCK_UNLOCK(so);
 
-	if( soinf->ring_buf.available_read() <= 0 ) { // za TCP, kjer nimam headerja
+	if( (available_read = soinf->ring_buf.available_read()) <= 0 ) { // za TCP, kjer nimam headerja
 
 		/* bsd/sys/kern/uipc_syscalls.cc:608 +- eps */
 		//SOCK_LOCK(so);  // ce dam stran: Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
 		// netperf naredi shutdown, potem pa hoce prebrati se preostanek podatkov.
 		if (so->so_rcv.sb_state & SBS_CANTRCVMORE == 0) { // TODO
+			SOCK_LOCK(so);
 			error = sbwait(so, &so->so_rcv);
+			SOCK_UNLOCK(so);
 		}
 		//
 		available_read = soinf->ring_buf.available_read();
 		fprintf_pos(stderr, "fd=%d so_state=0x%x so->so_rcv.sb_state=0x%x available_read=%d\n",
 			fd, so->so_state, so->so_rcv.sb_state, available_read);
 		// if (so->so_state == SS_ISDISCONNECTED) {
-		if (soinf->ring_buf.available_read() == 0 &&
+		if (available_read == 0 &&
 			so->so_rcv.sb_state & SBS_CANTRCVMORE) { // TODO
 			fprintf_pos(stderr, "fd=%d so_state=0x%x SS_ISDISCONNECTED  so->so_rcv.sb_state=0x%x SBS_CANTRCVMORE=0x%x\n", fd, so->so_state, so->so_rcv.sb_state, SBS_CANTRCVMORE);
 			//errno = ENOTCONN;
 			errno = EINTR; // to be netperf friendly
-			SOCK_UNLOCK(so);
+			//SOCK_UNLOCK(so);
 			fdrop(fp); /* TODO PAZI !!! */
 			return -1; // -errno
 		}
@@ -879,9 +882,9 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 	*/
 	size_t len2;
 	//sleep(1);
-	available_read = soinf->ring_buf.available_read();
+	//available_read = soinf->ring_buf.available_read();
 	fprintf_pos(stderr, "fd=%d available_read=%d\n", fd, available_read);
-	SOCK_UNLOCK(so); // ker data_pop caka na podatke
+	//SOCK_UNLOCK(so); // ker data_pop caka na podatke
 	len2 = soinf->data_pop(buf, len, so_rcv_state);
 	fprintf_pos(stderr, "fd=%d data_pop len2=%d\n", fd, len2);
 
