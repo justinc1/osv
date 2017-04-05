@@ -97,6 +97,8 @@ RingBufferV0::RingBufferV0()
 	wpos = 0;
 	rpos_cum = 0;
 	wpos_cum = 0;
+	wpos_cum2.store(0);
+	rpos_cum2.store(0);
 	// da ne bo cakanja na malloc v prvem recvfrom. Ce je sploh problem cakanje na malloc - mogoce samo IP-layer malo steka :/
 	//alloc(BYPASS_BUF_SZ);
 }
@@ -219,6 +221,7 @@ size_t RingBufferV0::push_part(const void* buf, size_t len)
 		wpos = len2;
 	}
 	wpos_cum += len;
+	wpos_cum2 += len;
 	MEM_BARRIER;
 
 	assert(0 <= rpos);
@@ -361,6 +364,7 @@ size_t RingBufferV0::pop_part(void* buf, size_t len)
 		rpos = len2;
 	}
 	rpos_cum += len;
+	rpos_cum2 += len;
 
 	MEM_BARRIER;
 	assert(wpos < length);

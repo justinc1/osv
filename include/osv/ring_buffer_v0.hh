@@ -42,6 +42,7 @@ public:
 	volatile size_t wpos;
 	size_t rpos_cum;
 	size_t wpos_cum;
+	std::atomic<size_t> wpos_cum2, rpos_cum2;
 public:
 };
 
