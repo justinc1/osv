@@ -6,6 +6,11 @@
 
 #include <lockfree/ring_buffer.hh>
 
+// SBS_CANTRCVMORE
+#ifndef SBS_CANTRCVMORE
+#define	SBS_CANTRCVMORE		0x0020	/* can't receive more data from peer */
+#endif // SBS_CANTRCVMORE
+
 class RingMessageHdr {
 public:
 	size_t length;
@@ -64,6 +69,7 @@ public:
 		size_t len2 = len;
 		while (len2 != 0) {
 			ret = ring_buffer_spsc::push(buf2, len2);
+			//assert(ret == len);
 			len2 -= ret;
 			buf2 += ret;
 		}
@@ -77,6 +83,7 @@ public:
 		size_t len2 = len;
 		while (len2 != 0) {
 			ret = ring_buffer_spsc::pop(buf2, len2);
+			//assert(ret == len);
 			len2 -= ret;
 			buf2 += ret;
 			if (so_rcv_state && (*so_rcv_state & SBS_CANTRCVMORE)) {

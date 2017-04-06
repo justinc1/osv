@@ -20,6 +20,9 @@
 #define ASSERT(...)
 //#define ASSERT(...) assert( __VA_ARGS__ )
 
+#define my_memcpy(dd,ss,ll) memcpy(dd,ss,ll)
+//#define my_memcpy(dd,ss,ll) {if(0) memcpy(dd,ss,ll);}
+
 //
 // spsc ring of fixed size
 // intended to store stream of data (not pointer/reference to elements)
@@ -58,7 +61,7 @@ public:
         end2 = end + len2;
         if ((end2 & ~MaxSizeMask) == (end & ~MaxSizeMask)) {
             // didn't wrap-around, high bits are equal
-            memcpy(_ring + (end & MaxSizeMask), buf, len2);
+            my_memcpy(_ring + (end & MaxSizeMask), buf, len2);
         }
         else {
             len2_p1 = MaxSize - (end & MaxSizeMask);
@@ -67,8 +70,8 @@ public:
             ASSERT(len2_p1 < MaxSize);
             ASSERT(len2_p2 < MaxSize);
             ASSERT((end & MaxSizeMask) + len2_p1 <= MaxSize);
-            memcpy(_ring + (end & MaxSizeMask), buf, len2_p1);
-            memcpy(_ring, buf + len2_p1, len2_p2);
+            my_memcpy(_ring + (end & MaxSizeMask), buf, len2_p1);
+            my_memcpy(_ring, buf + len2_p1, len2_p2);
         }
         //wpos_cum += len;
 
@@ -97,7 +100,7 @@ public:
         beg2 = beg + len2;
         if ((beg2 & ~MaxSizeMask) == (beg & ~MaxSizeMask)) {
             // didn't wrap-around, high bits are equal
-            memcpy(buf, _ring + (beg & MaxSizeMask), len2);
+            my_memcpy(buf, _ring + (beg & MaxSizeMask), len2);
         }
         else {
             len2_p1 = MaxSize - (beg & MaxSizeMask);
@@ -106,8 +109,8 @@ public:
             ASSERT(len2_p1 < MaxSize);
             ASSERT(len2_p2 < MaxSize);
             ASSERT((beg & MaxSizeMask) + len2_p1 <= MaxSize);
-            memcpy(buf, _ring + (beg & MaxSizeMask), len2_p1);
-            memcpy(buf + len2_p1, _ring, len2_p2);
+            my_memcpy(buf, _ring + (beg & MaxSizeMask), len2_p1);
+            my_memcpy(buf + len2_p1, _ring, len2_p2);
         }
         //rpos_cum += len;
         

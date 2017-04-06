@@ -73,11 +73,6 @@ int getsock_cap(int fd, struct file **fpp, u_int *fflagp);
 static mutex mtx_push_pop;
 #endif
 
-//#define my_memcpy memcpy
-#define my_memcpy memmove
-//#define my_memcpy repmovsb 
-// TODO TRY repmovsb 
-
 bool in_range(size_t val, size_t low, size_t high)
 {
 	if (high>low) {

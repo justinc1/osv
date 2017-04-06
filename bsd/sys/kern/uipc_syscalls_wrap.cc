@@ -76,11 +76,6 @@ static mutex mtx_ipbypass;
 
 pid_t ipbypass_tid0 = 1000000;;
 
-//#define my_memcpy memcpy
-#define my_memcpy memmove
-//#define my_memcpy repmovsb 
-// TODO TRY repmovsb 
-
 uint32_t my_ip_addr = 0x00000000;
 // all sockets
 class sock_info;
