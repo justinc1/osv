@@ -18,7 +18,7 @@
 #include <osv/debug.hh>
 
 // #define USE_ATOMIC 0 or 1
-#define RING_BUFFER_USE_ATOMIC 1
+#define RING_BUFFER_USE_ATOMIC 0
 
 #define ASSERT(...)
 //#define ASSERT(...) assert( __VA_ARGS__ )
