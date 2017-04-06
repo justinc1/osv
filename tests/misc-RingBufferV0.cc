@@ -78,6 +78,7 @@ private:
             TEST_DATA_TYPE element = std::rand() % max_random;
             // todo - partial read/write
             while (sizeof(element) != _ring.push(&element, sizeof(element)));
+                //debug("push DELAY ctr=%d\n", (int)ctr);
             _stats[cpu_id][element]++;
         }
     }
@@ -89,6 +90,7 @@ private:
         {
             TEST_DATA_TYPE element = 0;
             while (sizeof(element) != _ring.pop(&element, sizeof(element)));
+                //debug("pop DELAY ctr=%d\n", (int)ctr);
             _stats[cpu_id][element]++;
         }
     }
@@ -175,7 +177,7 @@ int main(int argc, char **argv)
     bool rc;
 #if 1
     debug("[~] Testing spsc ringbuffer:\n");
-    test_spsc_ring_buffer t1;
+    auto& t1 = *(new test_spsc_ring_buffer);
     beg = nanotime();
     rc = t1.run();
     end = nanotime();
