@@ -52,7 +52,11 @@ public:
         // Linux tree).
         //
         // allow partial write
-        len2 = std::min(len, MaxSize - sz);
+        //len2 = std::min(len, MaxSize - sz);
+        // forbid partial write
+        if (len > (MaxSize - sz))
+            return 0;
+        len2 = len;
 
         //new (&_ring[end & MaxSizeMask]) T(std::forward<Args>(args)...);
         //TODO - split into two memcpy calls
@@ -91,7 +95,11 @@ public:
         unsigned len2=0, len2_p1=0, len2_p2=0;
 
         // allow partial read
-        len2 = std::min(len, sz);
+        //len2 = std::min(len, sz);
+        // forbid partial read
+        if (len > sz)
+            return 0;
+        len2 = len;
 
         //element = _ring[beg & MaxSizeMask];
         //TODO - split into two memcpy calls
