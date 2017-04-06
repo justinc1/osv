@@ -17,6 +17,9 @@
 #include <osv/ilog2.hh>
 #include <osv/debug.hh>
 
+// #define USE_ATOMIC 0 or 1
+#define RING_BUFFER_USE_ATOMIC 1
+
 #define ASSERT(...)
 //#define ASSERT(...) assert( __VA_ARGS__ )
 
@@ -30,14 +33,25 @@
 template<unsigned MaxSize, unsigned MaxSizeMask = MaxSize - 1>
 class ring_buffer_spsc {
 public:
-    ring_buffer_spsc(): _begin(0), _end(0)
+    ring_buffer_spsc():
+#if RING_BUFFER_USE_ATOMIC
+     _begin(0), _end(0)
+#else
+     _begin2(0), _end2(0)
+#endif
     {
         static_assert(is_power_of_two(MaxSize), "size must be a power of two");
     }
 
     unsigned push(const void* buf, unsigned len)
     {
+#if RING_BUFFER_USE_ATOMIC
         unsigned end = _end.load(std::memory_order_relaxed);
+#else
+        unsigned end = _end2;
+#endif
+//TODO no atomic var
+//TODO no MaxSizeMask
         unsigned sz = size();
         //unsigned end_masked = end & MaxSizeMask;
         unsigned end2;
@@ -79,14 +93,22 @@ public:
         }
         //wpos_cum += len;
 
+#if RING_BUFFER_USE_ATOMIC
         _end.store(end + len2, std::memory_order_release);
+#else
+        _end2 = end + len2;
+#endif
 
         return len2;
     }
 
     unsigned pop(void* buf, unsigned len)
     {
+#if RING_BUFFER_USE_ATOMIC
         unsigned beg = _begin.load(std::memory_order_relaxed);
+#else
+        unsigned beg = _begin2;
+#endif
         unsigned sz = size();
         //unsigned beg_masked = beg & MaxSizeMask;
         unsigned beg2;
@@ -130,7 +152,11 @@ public:
         // trash the element at index "_begin & MaxSizeMask" (when the ring is
         // full) with the new value before the load in this function occurs.
         //
+#if RING_BUFFER_USE_ATOMIC
         _begin.store(beg + len2, std::memory_order_release);
+#else
+        _begin2 = beg + len2;
+#endif
 
         return len2;
     }
@@ -142,8 +168,13 @@ public:
      * @return TRUE if there are no elements
      */
     bool empty() const {
+#if RING_BUFFER_USE_ATOMIC
         unsigned beg = _begin.load(std::memory_order_relaxed);
         unsigned end = _end.load(std::memory_order_acquire);
+#else
+        unsigned beg = _begin2;
+        unsigned end = _end2;
+#endif
         return beg == end;
     }
 
@@ -156,8 +187,13 @@ public:
      * @return the current number of the elements.
      */
     unsigned size() const {
+#if RING_BUFFER_USE_ATOMIC
         unsigned end = _end.load(std::memory_order_relaxed);
         unsigned beg = _begin.load(std::memory_order_relaxed);
+#else
+        unsigned end = _end2;
+        unsigned beg = _begin2;
+#endif
 
         return (end - beg);
     }
@@ -168,8 +204,12 @@ protected:
     }
 
 private:
+#if RING_BUFFER_USE_ATOMIC
     std::atomic<unsigned> _begin CACHELINE_ALIGNED;
     std::atomic<unsigned> _end CACHELINE_ALIGNED;
+#else
+    unsigned _begin2, _end2;
+#endif
     char _ring[MaxSize];
 };
 

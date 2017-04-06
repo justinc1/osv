@@ -176,6 +176,7 @@ int main(int argc, char **argv)
     s64 beg, end;
     bool rc;
 #if 1
+#if RING_BUFFER_USE_ATOMIC
     debug("[~] Testing spsc ringbuffer:\n");
     auto& t1 = *(new test_spsc_ring_buffer);
     beg = nanotime();
@@ -191,6 +192,7 @@ int main(int argc, char **argv)
         debug("[-] spsc test failed\n");
         return 1;
     }
+#endif
 #endif
 
 #if 1
