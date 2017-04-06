@@ -231,6 +231,24 @@ int main(int argc, char **argv)
     }
 #endif
 
+#if 1
+    debug("\n");
+    debug("[~] Testing 1 thread ring_buffer_spsc<4MB>:\n");
+    auto& t4 = *(new test_1th<ring_buffer_spsc<1024*1024*4>>);
+    beg = nanotime();
+    rc = t4.run();
+    end = nanotime();
+    if (rc) {
+        double dT = (double)(end-beg)/1000000000.0;
+        debug("[+] 1 thread ring_buffer_spsc<4MB> test passed:\n");
+        debug("[+] duration: %.6fs\n", dT);
+        debug("[+] throughput: %.2f Gbit/s\n", (double)(BYTES_TO_PROCESS *8)/dT /(1024.0*1024*1024));
+    } else {
+        debug("[-] 1 thread ring_buffer_spsc<4MB> test failed\n");
+        return 1;
+    }
+#endif
+
     debug("[+] finished.\n");
     return 0;
 }

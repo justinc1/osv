@@ -43,6 +43,11 @@ public:
         static_assert(is_power_of_two(MaxSize), "size must be a power of two");
     }
 
+    void alloc(size_t len)
+    {
+        assert(len == MaxSize);
+    }
+
     unsigned push(const void* buf, unsigned len)
     {
 #if RING_BUFFER_USE_ATOMIC
@@ -102,7 +107,7 @@ public:
         return len2;
     }
 
-    unsigned pop(void* buf, unsigned len)
+    unsigned pop(void* buf, unsigned len, void* dummy=nullptr)
     {
 #if RING_BUFFER_USE_ATOMIC
         unsigned beg = _begin.load(std::memory_order_relaxed);
