@@ -65,35 +65,23 @@ public:
 	};
 	size_t push(const void* buf, size_t len) {
 		size_t ret;
-		char* buf2 = (char*)buf;
-		size_t len2 = len;
-		while (len2 != 0) {
-			ret = ring_buffer_spsc::push(buf2, len2);
-			//assert(ret == len);
-			len2 -= ret;
-			buf2 += ret;
+		while (0 == (ret = ring_buffer_spsc::push(buf, len))) {
 		}
-		wpos_cum += len;
-		wpos_cum2 += len;
-		return len;
+		wpos_cum += ret;
+		wpos_cum2 += ret;
+		return ret;
 	}
 	size_t pop(void* buf, size_t len, short *so_rcv_state=nullptr) {
 		size_t ret;
-		char* buf2 = (char*)buf;
-		size_t len2 = len;
-		while (len2 != 0) {
-			ret = ring_buffer_spsc::pop(buf2, len2);
-			//assert(ret == len);
-			len2 -= ret;
-			buf2 += ret;
+		while (0 == (ret = ring_buffer_spsc::pop(buf, len))) {
 			if (so_rcv_state && (*so_rcv_state & SBS_CANTRCVMORE)) {
 				// cantrecv is set, socket was closed while reading
 				break;
 			}
 		}
-		rpos_cum += len-len2;
-		rpos_cum2 += len-len2;
-		return len-len2;
+		rpos_cum += ret;
+		rpos_cum2 += ret;
+		return ret;
 	}
 public:
 	size_t available_read() {
