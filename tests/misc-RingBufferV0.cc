@@ -24,6 +24,7 @@
 //
 #define TEST_DATA_TYPE int
 
+template<typename RingBuf>
 class test_spsc_ring_buffer {
 public:
 
@@ -66,7 +67,7 @@ public:
 
 private:
 
-    ring_buffer_spsc<4096*sizeof(TEST_DATA_TYPE)> _ring;
+    RingBuf _ring;
 
     int _stats[2][max_random] = {};
 
@@ -177,17 +178,18 @@ int main(int argc, char **argv)
     bool rc;
 #if 1
 #if RING_BUFFER_USE_ATOMIC
-    debug("[~] Testing spsc ringbuffer:\n");
-    auto& t1 = *(new test_spsc_ring_buffer);
+    //ring_buffer_spsc<4096*sizeof(TEST_DATA_TYPE)>
+    debug("[~] Testing spsc test_spsc_ring_buffer<ring_buffer_spsc<4096*sizeof(TEST_DATA_TYPE)>>:\n");
+    auto& t1 = *(new test_spsc_ring_buffer<ring_buffer_spsc<4096*sizeof(TEST_DATA_TYPE)>>);
     beg = nanotime();
     rc = t1.run();
     end = nanotime();
         sleep(1);
     if (rc) {
         double dT = (double)(end-beg)/1000000000.0;
-        debug("[+] spsc test passed:\n");
+        debug("[+] spsc test test_spsc_ring_buffer<ring_buffer_spsc<4096*sizeof(TEST_DATA_TYPE)>>passed:\n");
         debug("[+] duration: %.6fs\n", dT);
-        debug("[+] throughput: %.0f ops/s\n", (double)(test_spsc_ring_buffer::elements_to_process*2)/dT);
+        debug("[+] throughput: %.0f ops/s\n", (double)(test_spsc_ring_buffer<ring_buffer_spsc<4096*sizeof(TEST_DATA_TYPE)>>::elements_to_process*2)/dT);
     } else {
         debug("[-] spsc test failed\n");
         return 1;
