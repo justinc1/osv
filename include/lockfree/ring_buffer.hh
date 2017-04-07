@@ -18,7 +18,7 @@
 #include <osv/debug.hh>
 
 // #define USE_ATOMIC 0 or 1
-#define RING_BUFFER_USE_ATOMIC 0
+#define RING_BUFFER_USE_ATOMIC 1
 
 #define ASSERT(...)
 //#define ASSERT(...) assert( __VA_ARGS__ )
@@ -30,7 +30,7 @@
 // spsc ring of fixed size
 // intended to store stream of data (not pointer/reference to elements)
 //
-template<unsigned MaxSize, unsigned MaxSizeMask = MaxSize - 1>
+template<unsigned MaxSize>
 class ring_buffer_spsc {
 public:
     ring_buffer_spsc():
@@ -40,7 +40,7 @@ public:
      _begin2(0), _end2(0)
 #endif
     {
-        static_assert(is_power_of_two(MaxSize), "size must be a power of two");
+        //static_assert(is_power_of_two(MaxSize), "size must be a power of two");
     }
 
     void alloc(size_t len)
@@ -73,8 +73,10 @@ public:
         // allow partial write
         //len2 = std::min(len, MaxSize - sz);
         // forbid partial write
-        if (len > (MaxSize - sz))
+        if (len >= (MaxSize - sz)) { // >= - end==begin je prepovedan, oz pomeni prazen, ne povsem poln.
+            //debug("PUSH err - len >= (MaxSize - sz), %d >= %d-%d==%d\n", len, MaxSize, sz, (MaxSize - sz) );
             return 0;
+        }
         len2 = len;
 
         //new (&_ring[end & MaxSizeMask]) T(std::forward<Args>(args)...);
@@ -82,26 +84,27 @@ public:
         //memcpy(_ring + (end & MaxSizeMask), buf, len);
 
         end2 = end + len2;
-        if ((end2 & ~MaxSizeMask) == (end & ~MaxSizeMask)) {
-            // didn't wrap-around, high bits are equal
-            my_memcpy(_ring + (end & MaxSizeMask), buf, len2);
+        if (end2 < MaxSize) {
+            // didn't wrap-around
+            my_memcpy(_ring + end, buf, len2);
         }
         else {
-            len2_p1 = MaxSize - (end & MaxSizeMask);
+            len2_p1 = MaxSize - end;
             len2_p2 = len2 - len2_p1;
+            end2 = len2_p2;
             ASSERT(len2_p1 + len2_p2 == len2);
             ASSERT(len2_p1 < MaxSize);
             ASSERT(len2_p2 < MaxSize);
-            ASSERT((end & MaxSizeMask) + len2_p1 <= MaxSize);
-            my_memcpy(_ring + (end & MaxSizeMask), buf, len2_p1);
+            ASSERT(end + len2_p1 <= MaxSize); // mora biti vedno res, <= len2_p1 = MaxSize - end;
+            my_memcpy(_ring + end, buf, len2_p1);
             my_memcpy(_ring, buf + len2_p1, len2_p2);
         }
         //wpos_cum += len;
 
 #if RING_BUFFER_USE_ATOMIC
-        _end.store(end + len2, std::memory_order_release);
+        _end.store(end2, std::memory_order_release);
 #else
-        _end2 = end + len2;
+        _end2 = end2;
 #endif
 
         return len2;
@@ -133,18 +136,19 @@ public:
         //memcpy(buf, _ring + (end & MaxSizeMask), len);
 
         beg2 = beg + len2;
-        if ((beg2 & ~MaxSizeMask) == (beg & ~MaxSizeMask)) {
-            // didn't wrap-around, high bits are equal
-            my_memcpy(buf, _ring + (beg & MaxSizeMask), len2);
+        if (beg2 < MaxSize) {
+            // didn't wrap-around
+            my_memcpy(buf, _ring + beg, len2);
         }
         else {
-            len2_p1 = MaxSize - (beg & MaxSizeMask);
+            len2_p1 = MaxSize - beg;
             len2_p2 = len2 - len2_p1;
+            beg2 = len2_p2;
             ASSERT(len2_p1 + len2_p2 == len2);
             ASSERT(len2_p1 < MaxSize);
             ASSERT(len2_p2 < MaxSize);
-            ASSERT((beg & MaxSizeMask) + len2_p1 <= MaxSize);
-            my_memcpy(buf, _ring + (beg & MaxSizeMask), len2_p1);
+            ASSERT(beg + len2_p1 <= MaxSize); // mora biti vedno ==
+            my_memcpy(buf, _ring + beg, len2_p1);
             my_memcpy(buf + len2_p1, _ring, len2_p2);
         }
         //rpos_cum += len;
@@ -158,9 +162,9 @@ public:
         // full) with the new value before the load in this function occurs.
         //
 #if RING_BUFFER_USE_ATOMIC
-        _begin.store(beg + len2, std::memory_order_release);
+        _begin.store(beg2, std::memory_order_release);
 #else
-        _begin2 = beg + len2;
+        _begin2 = beg2;
 #endif
 
         return len2;
@@ -199,8 +203,12 @@ public:
         unsigned end = _end2;
         unsigned beg = _begin2;
 #endif
-
-        return (end - beg);
+        if (end >= beg) {
+            return (end - beg);
+        }
+        else {
+            return (MaxSize + end) - beg;
+        }
     }
 
 protected:
