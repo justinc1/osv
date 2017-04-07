@@ -24,6 +24,10 @@
 //
 #define TEST_DATA_TYPE int
 
+#define BUF_SIZE (1LL* 1024*1024*4)
+#define CHUNK_SIZE (1LL* 1024*32)
+#define BYTES_TO_PROCESS (1LL*1000*1000*1000 * 100)
+
 template<typename RingBuf>
 class test_spsc_ring_buffer {
 public:
@@ -34,6 +38,8 @@ public:
     bool run()
     {
         assert (sched::cpus.size() >= 2);
+
+        _ring.alloc(BUF_SIZE); // v bistvu samo za RingBufferV0
 
         sched::thread * thread1 = sched::thread::make([&] { thread_push(0); },
             sched::thread::attr().pin(sched::cpus[0]));
@@ -55,7 +61,7 @@ public:
             unsigned pushed = _stats[0][i];
             unsigned popped = _stats[1][i];
 
-            debug("    value=%-08d pushed=%-08d popped=%-08d\n", i, pushed, popped);
+            //debug("    value=%-08d pushed=%-08d popped=%-08d\n", i, pushed, popped);
 
             if (pushed != popped) {
                 success = false;
@@ -96,11 +102,6 @@ private:
         }
     }
 };
-
-
-#define BUF_SIZE (1LL* 1024*1024*4)
-#define CHUNK_SIZE (1LL* 1024*32)
-#define BYTES_TO_PROCESS (1LL*1000*1000*1000 * 100)
 
 char data0[CHUNK_SIZE], data1[CHUNK_SIZE];
 
@@ -178,16 +179,16 @@ int main(int argc, char **argv)
     bool rc;
 #if 1
 #if RING_BUFFER_USE_ATOMIC
-    //ring_buffer_spsc<4096*sizeof(TEST_DATA_TYPE)>
+    // 16 kB
+    debug("\n");
     debug("[~] Testing spsc test_spsc_ring_buffer<ring_buffer_spsc<4096*sizeof(TEST_DATA_TYPE)>>:\n");
     auto& t1 = *(new test_spsc_ring_buffer<ring_buffer_spsc<4096*sizeof(TEST_DATA_TYPE)>>);
     beg = nanotime();
     rc = t1.run();
     end = nanotime();
-        sleep(1);
     if (rc) {
         double dT = (double)(end-beg)/1000000000.0;
-        debug("[+] spsc test test_spsc_ring_buffer<ring_buffer_spsc<4096*sizeof(TEST_DATA_TYPE)>>passed:\n");
+        debug("[+] spsc test test_spsc_ring_buffer<ring_buffer_spsc<4096*sizeof(TEST_DATA_TYPE)>> passed:\n");
         debug("[+] duration: %.6fs\n", dT);
         debug("[+] throughput: %.0f ops/s\n", (double)(test_spsc_ring_buffer<ring_buffer_spsc<4096*sizeof(TEST_DATA_TYPE)>>::elements_to_process*2)/dT);
     } else {
@@ -196,6 +197,95 @@ int main(int argc, char **argv)
     }
 #endif
 #endif
+
+#if 1
+#if RING_BUFFER_USE_ATOMIC
+    // 4 MB
+    debug("\n");
+    debug("[~] Testing spsc test_spsc_ring_buffer<RingBufferV0>:\n");
+    static_assert(4 == sizeof(TEST_DATA_TYPE), "sizeof(TEST_DATA_TYPE) != 4");
+    auto& t1c = *(new test_spsc_ring_buffer<RingBufferV0>);
+    beg = nanotime();
+    rc = t1c.run();
+    end = nanotime();
+    if (rc) {
+        double dT = (double)(end-beg)/1000000000.0;
+        debug("[+] spsc test test_spsc_ring_buffer<RingBufferV0> passed:\n");
+        debug("[+] duration: %.6fs\n", dT);
+        debug("[+] throughput: %.0f ops/s\n", (double)(test_spsc_ring_buffer<RingBufferV0>::elements_to_process*2)/dT);
+    } else {
+        debug("[-] spsc test failed\n");
+        return 1;
+    }
+#endif
+#endif
+
+#if 1
+#if RING_BUFFER_USE_ATOMIC
+    // 4 MB
+    debug("\n");
+    debug("[~] Testing spsc test_spsc_ring_buffer<RingBuffer_atomic>:\n");
+    auto& t1d = *(new test_spsc_ring_buffer<RingBuffer_atomic>);
+    beg = nanotime();
+    rc = t1d.run();
+    end = nanotime();
+    if (rc) {
+        double dT = (double)(end-beg)/1000000000.0;
+        debug("[+] spsc test test_spsc_ring_buffer<RingBuffer_atomic> passed:\n");
+        debug("[+] duration: %.6fs\n", dT);
+        debug("[+] throughput: %.0f ops/s\n", (double)(test_spsc_ring_buffer<RingBuffer_atomic>::elements_to_process*2)/dT);
+    } else {
+        debug("[-] spsc test failed\n");
+        return 1;
+    }
+#endif
+#endif
+
+#if 1
+#if RING_BUFFER_USE_ATOMIC
+    // 4 MB
+    debug("\n");
+    debug("[~] Testing spsc test_spsc_ring_buffer<ring_buffer_spsc<1024*1024*sizeof(TEST_DATA_TYPE)>>:\n");
+    static_assert(4 == sizeof(TEST_DATA_TYPE), "sizeof(TEST_DATA_TYPE) != 4");
+    auto& t1b = *(new test_spsc_ring_buffer<ring_buffer_spsc<1024*1024*sizeof(TEST_DATA_TYPE)>>);
+    beg = nanotime();
+    rc = t1b.run();
+    end = nanotime();
+    if (rc) {
+        double dT = (double)(end-beg)/1000000000.0;
+        debug("[+] spsc test test_spsc_ring_buffer<ring_buffer_spsc<1024*1024*sizeof(TEST_DATA_TYPE)>> passed:\n");
+        debug("[+] duration: %.6fs\n", dT);
+        debug("[+] throughput: %.0f ops/s\n", (double)(test_spsc_ring_buffer<ring_buffer_spsc<1024*1024*sizeof(TEST_DATA_TYPE)>>::elements_to_process*2)/dT);
+    } else {
+        debug("[-] spsc test failed\n");
+        return 1;
+    }
+#endif
+#endif
+
+
+#if 1
+#if RING_BUFFER_USE_ATOMIC
+    // 4 MB
+    debug("\n");
+    debug("[~] Testing spsc test_spsc_ring_buffer<ring_buffer_spsc<64KB>>:\n");
+    auto& t1e = *(new test_spsc_ring_buffer<ring_buffer_spsc<1024*64>>);
+    beg = nanotime();
+    rc = t1e.run();
+    end = nanotime();
+    if (rc) {
+        double dT = (double)(end-beg)/1000000000.0;
+        debug("[+] spsc test test_spsc_ring_buffer<ring_buffer_spsc<64KB>> passed:\n");
+        debug("[+] duration: %.6fs\n", dT);
+        debug("[+] throughput: %.0f ops/s\n", (double)(test_spsc_ring_buffer<ring_buffer_spsc<1024*64>>::elements_to_process*2)/dT);
+    } else {
+        debug("[-] spsc test failed\n");
+        return 1;
+    }
+#endif
+#endif
+
+debug("\n/*----------------------------------------------------------------------------*/\n");
 
 #if 1
     debug("\n");

@@ -59,7 +59,7 @@ int getsock_cap(int fd, struct file **fpp, u_int *fflagp);
 #  undef fprintf_pos
 #  define fprintf_pos(...) /**/
 #endif
-#if 0
+#if 1
 #  undef assert
 #  define assert(...) /**/
 #endif
