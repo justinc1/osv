@@ -28,7 +28,7 @@ class test_spsc_ring_buffer {
 public:
 
     static const int max_random = 25;
-    static const u64 elements_to_process = 3000000;//00;
+    static const u64 elements_to_process = 3000000*100;//00;
 
     bool run()
     {
