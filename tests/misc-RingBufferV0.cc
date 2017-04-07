@@ -249,6 +249,29 @@ int main(int argc, char **argv)
     }
 #endif
 
+#if 1
+    debug("\n");
+    if (CHUNK_SIZE<1024*64) {
+    debug("[~] Testing 1 thread ring_buffer_spsc<64KB>:\n");
+        auto& t5 = *(new test_1th<ring_buffer_spsc<1024*64>>);
+        beg = nanotime();
+        rc = t5.run();
+        end = nanotime();
+        if (rc) {
+            double dT = (double)(end-beg)/1000000000.0;
+            debug("[+] 1 thread ring_buffer_spsc<64KB> test passed:\n");
+            debug("[+] duration: %.6fs\n", dT);
+            debug("[+] throughput: %.2f Gbit/s\n", (double)(BYTES_TO_PROCESS *8)/dT /(1024.0*1024*1024));
+        } else {
+            debug("[-] 1 thread ring_buffer_spsc<256KB> test failed\n");
+            return 1;
+        }
+    }
+    else {
+        debug("[~] SKIP 1 thread ring_buffer_spsc<64KB>, CHUNK_SIZE=%d >= 64KB:\n", CHUNK_SIZE);
+    }
+#endif
+
     debug("[+] finished.\n");
     return 0;
 }

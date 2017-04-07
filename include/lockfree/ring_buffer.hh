@@ -45,7 +45,7 @@ public:
 
     void alloc(size_t len)
     {
-        assert(len == MaxSize);
+        //assert(len == MaxSize);
     }
 
     unsigned push(const void* buf, unsigned len)
