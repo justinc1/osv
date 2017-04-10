@@ -28,7 +28,22 @@
 #define CHUNK_SIZE (1LL* 1024*32)
 #define BYTES_TO_PROCESS (1LL*1000*1000*1000 * 100)
 
-template<typename RingBuf>
+template<unsigned SizeMax>
+class MyDT_tmpl {
+public:
+    union {
+        int val;
+        char dummy[SizeMax];
+    } uu;
+public:
+    int& value() { return uu.val; }
+};
+
+typedef MyDT_tmpl<4> MyDT_int;
+typedef MyDT_tmpl<1024*1> MyDT_1k;
+typedef MyDT_tmpl<1024*32> MyDT_32k;
+
+template<typename RingBuf, typename MyDT = MyDT_int>
 class test_spsc_ring_buffer {
 public:
 
@@ -38,6 +53,7 @@ public:
     bool run()
     {
         assert (sched::cpus.size() >= 2);
+        debug("sizeof(MyDT) = %d\n", sizeof(MyDT));
 
         _ring.alloc(BUF_SIZE); // v bistvu samo za RingBufferV0
 
@@ -80,25 +96,29 @@ private:
     void thread_push(int cpu_id)
     {
         std::srand(std::time(0));
+        MyDT element = *new(MyDT);
         for (u64 ctr=0; ctr < elements_to_process; ctr++)
         {
-            TEST_DATA_TYPE element = std::rand() % max_random;
+            element.value() = std::rand() % max_random;
             // todo - partial read/write
-            while (sizeof(element) != _ring.push(&element, sizeof(element)));
+            while (sizeof(element) != _ring.push(&element, sizeof(MyDT))) {
                 //debug("push DELAY ctr=%d\n", (int)ctr);
-            _stats[cpu_id][element]++;
+            }
+            _stats[cpu_id][element.value()]++;
         }
     }
 
     void thread_pop(int cpu_id)
     {
         std::srand(std::time(0));
+        MyDT element = *new(MyDT);
         for (u64 ctr=0; ctr < elements_to_process; ctr++)
         {
-            TEST_DATA_TYPE element = 0;
-            while (sizeof(element) != _ring.pop(&element, sizeof(element)));
+            element.value() = 0;
+            while (sizeof(element) != _ring.pop(&element, sizeof(MyDT))) {
                 //debug("pop DELAY ctr=%d\n", (int)ctr);
-            _stats[cpu_id][element]++;
+            }
+            _stats[cpu_id][element.value()]++;
         }
     }
 };
