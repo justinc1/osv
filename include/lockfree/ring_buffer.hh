@@ -88,7 +88,9 @@ public:
         end2 = end + len2;
         if (end2 < MaxSize) {
             // didn't wrap-around
+            //debug("push-a %x+%u==%x %u  buf=%x  val=%u\n", (long)_ring, end, (long)(_ring+end), len2, buf, (int)*((char*)buf));
             my_memcpy(_ring + end, buf, len2);
+            //debug("push-b %x+%u==%x %u  buf=%x  val=%u\n", (long)_ring, end, (long)(_ring+end), len2, buf, (int)*((char*)(_ring + end)));
         }
         else {
             len2_p1 = MaxSize - end;
@@ -140,7 +142,9 @@ public:
         beg2 = beg + len2;
         if (beg2 < MaxSize) {
             // didn't wrap-around
+            //debug("pop--a %x+%u==%x %u  buf=%x  val=%u\n", (long)_ring, beg, (long)(_ring+beg), len2, buf, (int)*((char*)(_ring + beg)));
             my_memcpy(buf, _ring + beg, len2);
+            //debug("pop--b %x+%u==%x %u  buf=%x  val=%u\n", (long)_ring, beg, (long)(_ring+beg), len2, buf, (int)*((char*)buf));
         }
         else {
             len2_p1 = MaxSize - beg;

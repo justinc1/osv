@@ -100,10 +100,12 @@ private:
         for (u64 ctr=0; ctr < elements_to_process; ctr++)
         {
             element.value() = std::rand() % max_random;
+            //debug("push-a ctr=%d, val=%x %x %d len=%d\n", ctr, &element, &(element.value()), element.value(), sizeof(MyDT));
             // todo - partial read/write
             while (sizeof(element) != _ring.push(&element, sizeof(MyDT))) {
                 //debug("push DELAY ctr=%d\n", (int)ctr);
             }
+            //debug("push-b ctr=%d, val=%d\n", ctr, element.value());
             _stats[cpu_id][element.value()]++;
         }
     }
@@ -118,6 +120,7 @@ private:
             while (sizeof(element) != _ring.pop(&element, sizeof(MyDT))) {
                 //debug("pop DELAY ctr=%d\n", (int)ctr);
             }
+            //debug("pop-b  ctr=%d, val=%x %x %d len=%d\n", ctr, &element, &(element.value()), element.value(), sizeof(MyDT));
             _stats[cpu_id][element.value()]++;
         }
     }
