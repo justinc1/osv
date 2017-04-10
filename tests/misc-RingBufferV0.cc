@@ -48,7 +48,7 @@ class test_spsc_ring_buffer {
 public:
 
     static const int max_random = 25;
-    static const u64 elements_to_process = 3000000*100;//00;
+    static const u64 elements_to_process = 3000000*10;//00;
 
     bool run()
     {
@@ -177,7 +177,7 @@ template<typename RingBuf, typename MyDT = MyDT_int>
 class test_2th_nocheck {
 public:
 
-    static const u64 elements_to_process = 3000000*100;//00;
+    static const u64 elements_to_process = 3000000*10;//00;
 
     bool run()
     {
