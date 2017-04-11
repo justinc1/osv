@@ -14,6 +14,7 @@
 
 #include "drivers/virtio.hh"
 #include "drivers/device.hh"
+#include <atomic>
 
 namespace virtio {
 
@@ -44,6 +45,22 @@ private:
 };
 
 }
+
+class ivm_lock {
+public:
+    ivm_lock();
+    ~ivm_lock();
+    void lock();
+    void unlock();
+
+    static uint64_t s_owner_id_base;
+    static uint64_t owner_id() {
+        return s_owner_id_base + gettid();
+    };
+public:
+    std::atomic<bool> lock_flag;
+    uint64_t owner; // inter-vm, per-thread unique ID. How to get such value? MAC, IP, uuid, random + thread_id?
+};
 
 extern "C" {
 int ivshmem_get(size_t size);

@@ -169,21 +169,6 @@ bool ivshmem_segment::intersect(volatile void* data0, size_t size0)
     }
 }
 
-class ivm_lock {
-public:
-    ivm_lock();
-    ~ivm_lock();
-    void lock();
-    void unlock();
-
-    static uint64_t s_owner_id_base;
-    static uint64_t owner_id() {
-        return s_owner_id_base + gettid();
-    };
-public:
-    atomic<bool> lock_flag;
-    uint64_t owner; // inter-vm, per-thread unique ID. How to get such value? MAC, IP, uuid, random + thread_id?
-};
 uint64_t ivm_lock::s_owner_id_base = 0;
 
 /*
