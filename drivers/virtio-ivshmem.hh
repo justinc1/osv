@@ -31,7 +31,7 @@ public:
 
     static hw_driver* probe(hw_device* dev);
 
-    volatile void* get_data();
+    void* get_data();
     size_t get_size();
 
 private:
@@ -40,7 +40,7 @@ private:
     bool ack_irq();
 
     pci_interrupt _irq;
-    volatile void* _data;
+    void* _data;
     size_t _size;
 };
 
@@ -64,8 +64,8 @@ public:
 
 extern "C" {
 int ivshmem_get(size_t size);
-volatile void* ivshmem_at(int id);
-int ivshmem_dt(volatile void* data);
+void* ivshmem_at(int id);
+int ivshmem_dt(void* data);
 }
 
 #endif

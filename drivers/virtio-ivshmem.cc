@@ -40,7 +40,7 @@ ivshmem::ivshmem(pci::device& pci_dev)
     pci::bar *bar;
     bar = pci_dev.get_bar(3);
     bar->map();
-    _data = bar->get_mmio();
+    _data = (void*)bar->get_mmio();
     _size = bar->read_bar_size();
 
 #if 0
@@ -120,7 +120,7 @@ hw_driver* ivshmem::probe(hw_device* dev)
     return virtio::probe<ivshmem, VIRTIO_IVSHMEM_DEVICE_ID>(dev);
 }
 
-volatile void* ivshmem::get_data()
+void* ivshmem::get_data()
 {
     return _data;
 }
@@ -134,13 +134,13 @@ size_t ivshmem::get_size()
 
 class ivshmem_segment {
 public:
-    volatile void* data;
+    void* data;
     size_t size;
     int ref_count;
     //bool delete_flag;
 
     ivshmem_segment();
-    bool intersect(volatile void* data0, size_t size0);
+    bool intersect(void* data0, size_t size0);
 };
 
 ivshmem_segment::ivshmem_segment()
@@ -151,7 +151,7 @@ ivshmem_segment::ivshmem_segment()
     //delete_flag = false;
 }
 
-bool ivshmem_segment::intersect(volatile void* data0, size_t size0)
+bool ivshmem_segment::intersect(void* data0, size_t size0)
 {
     /*
     To not intersect, data0 and (data0+size0) have to both smaller
@@ -374,7 +374,7 @@ int ivshmem_get(size_t size) {
     }
 
     // search for free piece of mem
-    volatile void* data = get_layout_shm_data(); // Candidate used for first segment
+    void* data = get_layout_shm_data(); // Candidate used for first segment
     for (auto it1=s_segments.begin(); it1!=s_segments.end(); ++it1) {
         auto data1 = it1->second.data;
         auto size1 = it1->second.size;
@@ -418,7 +418,7 @@ int ivshmem_get(size_t size) {
     return id;
 }
 
-volatile void* ivshmem_at(int id) {
+void* ivshmem_at(int id) {
     IVM_LOCK_OBJ_LOCK();
     ivshmem_check();
     auto it = s_segments.find(id);
@@ -434,7 +434,7 @@ volatile void* ivshmem_at(int id) {
     return it->second.data;
 }
 
-int ivshmem_dt(volatile void* data) {
+int ivshmem_dt(void* data) {
     IVM_LOCK_OBJ_LOCK();
     ivshmem_check();
     for (auto it=s_segments.begin(); it!=s_segments.end(); ++it) {
