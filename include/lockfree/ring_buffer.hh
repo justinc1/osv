@@ -16,6 +16,7 @@
 #include <arch.hh>
 #include <osv/ilog2.hh>
 #include <osv/debug.hh>
+#include <drivers/virtio-ivshmem.hh>
 
 // #define USE_ATOMIC 0 or 1
 #define RING_BUFFER_USE_ATOMIC 1
@@ -46,6 +47,45 @@ public:
     void alloc(size_t len)
     {
         //assert(len == MaxSize);
+    }
+
+    void call_ctor()
+    {
+        // do what ctor does.
+#if RING_BUFFER_USE_ATOMIC
+        this->_begin = 0;
+        this->_end = 0;
+#else
+        this->_begin2 = 0;
+        this->_end2 = 0;
+#endif
+    }
+
+    void call_dtor()
+    {
+
+    }
+
+    static ring_buffer_spsc <MaxSize>* alloc_ivshmem()
+    {
+        //_ring = nullptr;
+        ring_buffer_spsc<MaxSize> *obj;
+        int shmid = ivshmem_get(sizeof(ring_buffer_spsc<MaxSize>));
+        if (shmid == -1) {
+            return nullptr;
+        }
+        obj = (ring_buffer_spsc<MaxSize>*)ivshmem_at(shmid);
+        if (obj == nullptr) {
+            return nullptr;
+        }
+        obj->call_ctor();
+        return obj;
+    }
+
+    void free_ivshmem()
+    {
+        call_dtor();
+        ivshmem_dt(this);
     }
 
     unsigned push(const void* buf, unsigned len)

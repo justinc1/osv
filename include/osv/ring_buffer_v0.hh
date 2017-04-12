@@ -59,10 +59,50 @@ public:
 		wpos_cum2.store(0);
 		rpos_cum2.store(0);
 	};
-	~RingBuffer_atomic();
+	~RingBuffer_atomic() {
+	};
 	void alloc(size_t len) {
 		assert(len == BYPASS_BUF_SZ);
 	};
+public:
+    void call_ctor()
+    {
+        // do what ctor does.
+        ring_buffer_spsc::call_ctor();
+
+        data = ring_buffer_spsc::get_data();
+		wpos_cum = rpos_cum = 0;
+		wpos_cum2.store(0);
+		rpos_cum2.store(0);
+    }
+
+    void call_dtor()
+    {
+
+    }
+
+    static RingBuffer_atomic* alloc_ivshmem()
+    {
+        //_ring = nullptr;
+        RingBuffer_atomic *obj;
+        int shmid = ivshmem_get(sizeof(RingBuffer_atomic));
+        if (shmid == -1) {
+            return nullptr;
+        }
+        obj = (RingBuffer_atomic*)(ivshmem_at(shmid));
+        if (obj == nullptr) {
+            return nullptr;
+        }
+        obj->call_ctor();
+        return obj;
+    }
+
+    void free_ivshmem()
+    {
+        call_dtor();
+        ivshmem_dt(this);
+    }
+public:
 	size_t push(const void* buf, size_t len) {
 		size_t ret;
 		while (0 == (ret = ring_buffer_spsc::push(buf, len))) {
