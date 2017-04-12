@@ -63,8 +63,8 @@ int getsock_cap(int fd, struct file **fpp, u_int *fflagp);
 
 #include <osv/mutex.h>
 #include <osv/ring_buffer_v0.hh>
-#define RingBuffer RingBufferV0
-//#define RingBuffer RingBuffer_atomic
+//#define RingBuffer RingBufferV0
+#define RingBuffer RingBuffer_atomic
 
 #define IPBYPASS_LOCKED 0
 #define MEM_BARRIER 
@@ -120,6 +120,11 @@ public:
 	size_t data_push(const void* buf, size_t len);
 	size_t data_pop(void* buf, size_t len, short *so_rcv_state=nullptr);
 public:
+    void call_ctor();
+    void call_dtor();
+    static sock_info* alloc_ivshmem();
+    void free_ivshmem();
+public:
 	int fd;
 	bool is_bypass;
 	// should be ivshmem ring or virtio ring
@@ -146,6 +151,11 @@ public:
 };
 
 sock_info::sock_info() {
+	call_ctor();
+}
+
+void sock_info::call_ctor() {
+	ring_buf.call_ctor();
 	fd = -1;
 	is_bypass = false;
 	my_proto = -1;
@@ -155,6 +165,28 @@ sock_info::sock_info() {
 	peer_port = 0;
 	peer_fd = -1;
 	accept_fd = -1;
+}
+
+void sock_info::call_dtor() {
+}
+
+sock_info* sock_info::alloc_ivshmem() {
+    sock_info *obj;
+    int shmid = ivshmem_get(sizeof(sock_info));
+    if (shmid == -1) {
+        return nullptr;
+    }
+    obj = (sock_info*)ivshmem_at(shmid);
+    if (obj == nullptr) {
+        return nullptr;
+    }
+    obj->call_ctor();
+    return obj;
+}
+
+void sock_info::free_ivshmem() {
+    call_dtor();
+    ivshmem_dt(this);
 }
 
 void sock_info::bypass(uint32_t _peer_addr, ushort _peer_port, int _peer_fd) {
@@ -215,8 +247,10 @@ size_t sock_info::data_pop(void* buf, size_t len, short *so_rcv_state) {
 
 
 void sol_insert(int fd, int protocol) {
-	sock_info *soinf = new sock_info;
+	sock_info *soinf = sock_info::alloc_ivshmem();
 	fprintf(stderr, "INSERT-ing fd=%d soinf=%p\n", fd, soinf);
+	if (soinf == nullptr)
+		return;
 	soinf->fd = fd;
 	soinf->my_proto = protocol;
 	so_list.push_back(soinf);
@@ -245,7 +279,7 @@ void sol_remove(int fd, int protocol) {
 
 			fprintf_pos(stderr, "DELETE-ed fd=%d soinf=%p\n", fd, soinf);
 			memset(soinf, 0x00, sizeof(*soinf));
-			delete soinf;
+			soinf->free_ivshmem();
 		}
 		else {
 			it++;
