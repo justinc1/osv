@@ -1451,10 +1451,19 @@ int so_bypass(int fd)
 // v host order
 //#define IPV4_TO_UINT32(a,b,c,d) ( (((a&0x000000FF)*256 + (b&0x000000FF))*256 + (c&0x000000FF))*256 + (d&0x000000FF) )
 #define IPV4_TO_UINT32(a,b,c,d) (ntohl( (a)*0x01000000ul + (b)*0x00010000ul + (c)*0x00000100ul + (d)*0x00000001ul ))
+
+uint32_t get_ipv4_addr() {
+	char *str = getenv("OSV_IP");
+	uint32_t a=0, b=0, c=0, d=0;
+	sscanf(str, "%u.%u.%u.%u", &a, &b, &c, &d);
+	fprintf_pos(stderr, "IP=%s == %d.%d.%d.%d\n", str, a, b, c, d);
+	return IPV4_TO_UINT32(a,b,c,d);
+}
+
 void ipbypass_setup() {
 	fprintf_pos(stderr, "TADA...\n", "");
 	//sleep(1);
-	my_ip_addr = IPV4_TO_UINT32(192,168,122,90);
+	my_ip_addr = get_ipv4_addr();
 	so_list.reserve(10);
 
 	socket_func = socket;
