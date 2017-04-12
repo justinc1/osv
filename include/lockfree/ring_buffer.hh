@@ -221,13 +221,13 @@ protected:
     }
 
 private:
+    char _ring[MaxSize];
 #if RING_BUFFER_USE_ATOMIC
     std::atomic<unsigned> _begin CACHELINE_ALIGNED;
     std::atomic<unsigned> _end CACHELINE_ALIGNED;
 #else
     unsigned _begin2, _end2;
 #endif
-    char _ring[MaxSize];
 };
 
 #endif // !__LF_RING_BUFFER_HH__
