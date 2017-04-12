@@ -41,8 +41,6 @@ public:
 #endif
     {
         //static_assert(is_power_of_two(MaxSize), "size must be a power of two");
-        _ring = (char*)malloc(MaxSize);
-        memset(_ring, 0x00, MaxSize);
     }
 
     void alloc(size_t len)
@@ -229,7 +227,7 @@ private:
 #else
     unsigned _begin2, _end2;
 #endif
-    char *_ring;//[MaxSize]; // je lahko enako, bi rekel
+    char _ring[MaxSize];
 };
 
 #endif // !__LF_RING_BUFFER_HH__
