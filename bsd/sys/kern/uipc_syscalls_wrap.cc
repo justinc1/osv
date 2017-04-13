@@ -1013,12 +1013,43 @@ ssize_t recvmsg(int fd, struct msghdr *msg, int flags)
 	return bytes;
 }
 
+
+int wake_foreigen_socket(int peer_fd, int len2) {
+	/* bsd/sys/kern/uipc_syscalls.cc:608 +- eps */
+	int error;
+	struct file *fp;
+	struct socket *so;
+	error = getsock_cap(peer_fd, &fp, NULL); /* za tcp tu vec nimam pravega fd-ja :/ */
+	if (error)
+		return (error);
+	so = (socket*)file_data(fp);
+	/* bsd/sys/kern/uipc_socket.cc:2425 */
+	SOCK_LOCK(so);
+	//
+	//error = sbwait(so, &so->so_rcv);
+	// via so->so_rcv.sb_cc does poll_scan -> socket_file::poll -> sopoll -> sopoll_generic -> sopoll_generic_locked 
+	// -> soreadabledata detects that there are readable data
+	so->so_rcv.sb_cc += len2; // and so->so_rcv.sb_cc_wq wake_all ??
+	//so->so_nc_wq.wake_all(SOCK_MTX_REF(so)); // tega lahko izpustim
+	so->so_rcv.sb_cc_wq.wake_all(SOCK_MTX_REF(so)); // ta mora biti
+	//
+	// tole je pa za poll()
+	// a potem mogoce zgornjega so->so_nc_wq.wake_all vec ne rabim?
+	//	int poll_wake(struct file* fp, int events)
+	// Tudi tega zdaj lahko izpustim? Ali pa ne, potem spet obvisi.
+	int events = 1; // recimo, da je 1 ok :/
+	poll_wake(fp, events);
+	//
+	SOCK_UNLOCK(so);
+	fdrop(fp); /* TODO PAZI !!! */
+	return 0;
+}
+
 ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
     const struct bsd_sockaddr *addr, socklen_t alen) {
 
 	//return len;
 
-	int error;
  	sock_info *soinf = sol_find(fd);
 	fprintf_pos(stderr, "fd=%d soinf=%p %d\n", fd, soinf, soinf?soinf->fd:-1);
 	if(!soinf) {
@@ -1105,33 +1136,8 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	len2 = soinf_peer->data_push(buf, len);
 	//sleep(1);
 
-	/* bsd/sys/kern/uipc_syscalls.cc:608 +- eps */
-	struct file *fp;
-	struct socket *so;
-	error = getsock_cap(soinf_peer->fd, &fp, NULL); /* za tcp tu vec nimam pravega fd-ja :/ */
-	if (error)
-		return (error);
-	so = (socket*)file_data(fp);
-	/* bsd/sys/kern/uipc_socket.cc:2425 */
-	SOCK_LOCK(so);
-	//
-	//error = sbwait(so, &so->so_rcv);
-	// via so->so_rcv.sb_cc does poll_scan -> socket_file::poll -> sopoll -> sopoll_generic -> sopoll_generic_locked 
-	// -> soreadabledata detects that there are readable data
-	so->so_rcv.sb_cc += len2; // and so->so_rcv.sb_cc_wq wake_all ??
-	//so->so_nc_wq.wake_all(SOCK_MTX_REF(so)); // tega lahko izpustim
-	so->so_rcv.sb_cc_wq.wake_all(SOCK_MTX_REF(so)); // ta mora biti
-	//
-	// tole je pa za poll()
-	// a potem mogoce zgornjega so->so_nc_wq.wake_all vec ne rabim?
-	//	int poll_wake(struct file* fp, int events)
-	// Tudi tega zdaj lahko izpustim? Ali pa ne, potem spet obvisi.
-	int events = 1; // recimo, da je 1 ok :/
-	poll_wake(fp, events);
-	//
-	SOCK_UNLOCK(so);
-	fdrop(fp); /* TODO PAZI !!! */
-SENDTO_BYPASS_USLEEP(1000*200);
+	wake_foreigen_socket(soinf_peer->fd, len2);
+SENDTO_BYPASS_USLEEP(1000*500);
 	return len2;
 
 	/*
