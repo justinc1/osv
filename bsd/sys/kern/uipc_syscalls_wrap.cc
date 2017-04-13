@@ -132,6 +132,7 @@ public:
 public:
 	int fd;
 	bool is_bypass;
+    std::atomic<bool> modified;
 	// should be ivshmem ring or virtio ring
 	
 	//boost::circular_buffer<char> in_buf;
@@ -164,6 +165,7 @@ void sock_info::call_ctor() {
 	ring_buf.call_ctor();
 	fd = -1;
 	is_bypass = false;
+	modified = false;
 	my_proto = -1;
 	my_addr = 0xFFFFFFFF;
 	my_port = 0;
@@ -1045,6 +1047,41 @@ int wake_foreigen_socket(int peer_fd, int len2) {
 	return 0;
 }
 
+/*
+Recimo, da bi zdaj:
+ VM1 nastavila en flag v ivshmem
+ VM0 pa bere tisti flag, in ko ga vidi, klice wake_foreigen_socket()
+ VM0 dobi dodaten scanner thread, ali pa to pocnem v idle threadu/threadih
+ Nekoc bi potem VM0 moral ta "notification" dobiti via interrupt.
+ flag - vsak ring_buffer naj ima svoj flag, VM0 potem skenira vse flag-e.
+*/
+
+void* bypass_scanner(void *args) {
+	bool modified;
+	int len2;
+	fprintf(stderr, "bypass_scanner START, args=%p\n", args);
+	while (1) {
+		len2 = 0;
+		for (auto soinf:so_list) {
+			if(soinf == nullptr)
+				continue;
+			modified = soinf->modified.load(std::memory_order_relaxed);
+			if (modified) {
+		        soinf->modified.store(false, std::memory_order_release);
+		        len2 = 1;
+				fprintf_pos(stderr, "fd=%d soinf=%p is modified, WAKE UP\n", soinf->fd, soinf);
+		        wake_foreigen_socket(soinf->fd, len2);
+			}
+		}
+		if (len2 == 0) {
+			// no socket was modified, sleep a bit
+			usleep(1000);
+		}
+	}
+	fprintf(stderr, "bypass_scanner DONE, args=%p\n", args);
+	return 0;
+}
+
 ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
     const struct bsd_sockaddr *addr, socklen_t alen) {
 
@@ -1136,7 +1173,8 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	len2 = soinf_peer->data_push(buf, len);
 	//sleep(1);
 
-	wake_foreigen_socket(soinf_peer->fd, len2);
+	//wake_foreigen_socket(soinf_peer->fd, len2);
+	soinf_peer->modified.store(true, std::memory_order_release);
 SENDTO_BYPASS_USLEEP(1000*500);
 	return len2;
 
@@ -1485,4 +1523,11 @@ void ipbypass_setup() {
 	so_list.reserve(10);
 
 	socket_func = socket;
+
+	pthread_t pthread;
+	void* args = NULL;
+	pthread_create(&pthread, NULL, bypass_scanner, args);
+	pthread_setname_np(pthread, "bypass_scanner");
+	//void* retval;
+	//pthread_join(pthread, &retval);
 }
