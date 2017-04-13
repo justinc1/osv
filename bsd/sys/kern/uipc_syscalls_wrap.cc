@@ -501,7 +501,7 @@ int accept_bypass(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__res
 	soinf2->my_id = soinf->my_id;
 	soinf2->my_addr = my_ip_addr; //soinf->my_addr; // soinf->my_addr == 0.0.0.0, tipicno. Medtem ko client ve, kam klice.
 	soinf2->my_port = soinf->my_port;
-	soinf2->bypass(0, soinf2->my_addr, soinf2->my_port, -1); // Kje poslusam jaz, vem. Kdo se bo gor povezal, pa ne vem, zato peer fd = -1.
+	soinf2->bypass(0, 0xFFFFFFFF, 0, -1); // Kje poslusam jaz, vem. Kdo se bo gor povezal, pa ne vem, zato peer fd = -1, in enako vse ostalo od peer-a.
 	//
 	soinf->accept_soinf = soinf2;
 
