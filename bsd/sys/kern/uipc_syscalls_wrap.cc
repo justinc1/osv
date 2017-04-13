@@ -121,7 +121,8 @@ bool check_sock_flags(int fd) {
 class sock_info {
 public:
 	sock_info();
-	void bypass(uint32_t peer_addr=0xFFFFFFFF, ushort peer_port=0, int peer_fd=-1);
+	//void bypass(uint32_t peer_addr=0xFFFFFFFF, ushort peer_port=0, int peer_fd=-1);
+	void bypass(uint32_t peer_addr, ushort peer_port, int peer_fd);
 	size_t data_push(const void* buf, size_t len);
 	size_t data_pop(void* buf, size_t len, short *so_rcv_state=nullptr);
 public:
@@ -592,7 +593,7 @@ int bind(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	   ) {
 		fprintf_pos(stderr, "INFO fd=%d me %d_0x%08x:%d try to bypass\n", 
 			fd, soinf->fd, ntohl(soinf->my_addr), ntohs(soinf->my_port));
-		soinf->bypass();
+		soinf->bypass(0xFFFFFFFF, 0, -1);
 	}
 	else {
 		fprintf_pos(stderr, "INFO fd=%d me %d_0x%08x:%d bypass not possible\n", 
