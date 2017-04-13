@@ -298,7 +298,7 @@ void sol_insert(int fd, int protocol) {
 	// TODO - add VM owner_id
 	int ii;
 	for (ii = 0; so_list && ii < SOCK_INFO_LIST_LEN; ii++) {
-		fprintf(stderr, "INSERT-search so_list[%d]=%p\n", ii, (*so_list)[ii]);
+		fprintf(stderr, "INSERT-search so_list[%d]=%p soinf=%s\n", ii, (*so_list)[ii], (*so_list)[ii]->c_str());
 		if ((*so_list)[ii] == nullptr) {
 			(*so_list)[ii] = soinf;
 			break;
@@ -308,7 +308,7 @@ void sol_insert(int fd, int protocol) {
 		fprintf(stderr, "ERROR sol_insert inserting fd=%d soinf=%p, all slots used :/\n", fd, soinf);
 		exit(1);
 	}
-	fprintf(stderr, "INSERT-ed fd=%d soinf=%p at so_list[%d]=%p\n", fd, soinf, ii, &((*so_list)[ii]));
+	fprintf(stderr, "INSERT-ed fd=%d soinf=%p at so_list[%d]=%p soinf=%s\n", fd, soinf, ii, &((*so_list)[ii]), soinf->c_str());
 }
 
 void sol_remove(int fd, int protocol) {
@@ -621,7 +621,7 @@ int bind(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	in_addr = (sockaddr_in*)(void*)addr;
 	soinf->my_addr = in_addr->sin_addr.s_addr;
 	soinf->my_port = in_addr->sin_port;
-	fprintf_pos(stderr, "fd=%d me (from input addr) %d_0x%08x:%d\n", fd, fd, ntohl(soinf->my_addr), ntohs(soinf->my_port));
+	fprintf_pos(stderr, "fd=%d me (from input addr ) %s\n", fd, soinf->c_str());
 
 	struct bsd_sockaddr addr2;
 	socklen_t len2 = sizeof(addr2);
@@ -637,7 +637,7 @@ int bind(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	assert(soinf->my_id == my_owner_id);
 	soinf->my_addr = in_addr->sin_addr.s_addr;
 	soinf->my_port = in_addr->sin_port;
-	fprintf_pos(stderr, "fd=%d me (from getsockname) %d_0x%08x:%d\n", fd, fd, ntohl(soinf->my_addr), ntohs(soinf->my_port));
+	fprintf_pos(stderr, "fd=%d me (from getsockname) %s\n", fd, soinf->c_str());
 
 
 	// enable bypass for all server-side sockets.
@@ -648,13 +648,11 @@ int bind(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		  (soinf->my_addr == my_ip_addr ||
 		   soinf->my_addr == 0x00000000 /*ANY ADDR*/ )
 	   ) {
-		fprintf_pos(stderr, "INFO fd=%d me %d_0x%08x:%d try to bypass\n", 
-			fd, soinf->fd, ntohl(soinf->my_addr), ntohs(soinf->my_port));
+		fprintf_pos(stderr, "INFO fd=%d me %s try to bypass\n", fd, soinf->c_str());
 		soinf->bypass(0, 0xFFFFFFFF, 0, -1);
 	}
 	else {
-		fprintf_pos(stderr, "INFO fd=%d me %d_0x%08x:%d bypass not possible\n", 
-			fd, soinf->fd, ntohl(soinf->my_addr), ntohs(soinf->my_port));
+		fprintf_pos(stderr, "INFO fd=%d me %s bypass not possible\n", fd, soinf->c_str());
 	}
 
 #if 0
@@ -765,9 +763,9 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		assert(soinf_peer != nullptr); // ali pa implementiraj se varianto "najprej client, potem server"
 
 		peer_fd = soinf_peer->fd;
-		fprintf_pos(stderr, "INFO connect fd=%d me %d_0x%08x:%d peer %d_0x%08x:%d try to bypass\n", 
-			fd, fd, ntohl(soinf->my_addr), ntohs(soinf->my_port),
-			peer_fd, ntohl(peer_addr), ntohs(peer_port));
+		fprintf_pos(stderr, "INFO connect fd=%d me %s to peer %d:%d_0x%08x:%d try to bypass\n",
+			fd, soinf->c_str(),
+			peer_id, peer_fd, ntohl(peer_addr), ntohs(peer_port));
 		if(soinf->is_bypass) {
 			fprintf_pos(stderr, "INFO already bypass-ed fd me/peer %d %d.\n", fd, peer_fd);
 			// hja, zdaj pa is_bypass je ze true, peer_* pa na defualt vrednostih . jej jej jej. 
@@ -781,14 +779,11 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		}
 	}
 	else {
-		fprintf_pos(stderr, "INFO connect fd=%d me=0x%08x:%d peer 0x%08x:%d bypass not possible\n", 
-			fd, ntohl(soinf->my_addr), ntohs(soinf->my_port), ntohl(peer_addr), ntohs(peer_port));
+		fprintf_pos(stderr, "INFO connect fd=%d me %s peer %d:%d_0x%08x:%d bypass not possible\n",
+			fd, soinf->c_str(), peer_id, peer_fd, ntohl(peer_addr), ntohs(peer_port));
 	}
 
-	fprintf_pos(stderr, "INFO connect new_state fd=%d %d_0x%08x:%d <-> %d_0x%08x:%d\n", 
-		fd, 
-		soinf->fd, ntohl(soinf->my_addr), ntohs(soinf->my_port),
-		soinf->peer_fd, ntohl(soinf->peer_addr), ntohs(soinf->peer_port));
+	fprintf_pos(stderr, "INFO connect new_state fd=%d %s\n", fd, soinf->c_str());
 
 	/* ta connect crkne, ce je to UDP server - t.j. bind, nato connect. Vmes moras vsaj en paket prejeti?
 	Samo potem, ko preskocim connect, me pa zaj naslednji server socket, ko nov thread javi "bind failed: Address in use".
@@ -797,8 +792,8 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		//do_linux_connect = false;
 		// server se hoce connectat-i nazaj na clienta, samo zaradi bypass ni izvedel pravega porta.
 		// dodaj se eno goljufijo vec...
-		fprintf(stderr, "INFO INFO INFO connect fd=%d insert faked addr/port from soinf_peer %d_0x%08x:%d\n",
-			fd, soinf_peer->fd, ntohl(soinf_peer->my_addr), ntohs(soinf_peer->my_port));
+		fprintf(stderr, "INFO INFO INFO connect fd=%d insert faked addr/port from soinf_peer %s\n",
+			fd, soinf_peer->c_str());
 		in_addr->sin_addr.s_addr = soinf_peer->my_addr;
 		in_addr->sin_port = soinf_peer->my_port;
 	}
@@ -858,18 +853,9 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		// cisto nazadnje
 		soinf2->peer_fd = fd; // == soinf_peer->accept_soinf->peer_fd , flag za cakanje
 
-		fprintf_pos(stderr, "INFO connect soinf updated fd=%d %d_0x%08x:%d <-> %d_0x%08x:%d\n", 
-			fd, 
-			soinf->fd, ntohl(soinf->my_addr), ntohs(soinf->my_port),
-			soinf->peer_fd, ntohl(soinf->peer_addr), ntohs(soinf->peer_port));
-		fprintf_pos(stderr, "INFO connect soinf_peer fd=%d %d_0x%08x:%d <-> %d_0x%08x:%d\n", 
-			fd, 
-			soinf_peer->fd, ntohl(soinf_peer->my_addr), ntohs(soinf_peer->my_port),
-			soinf_peer->peer_fd, ntohl(soinf_peer->peer_addr), ntohs(soinf_peer->peer_port));
-		fprintf_pos(stderr, "INFO connect soinf2     fd=%d %d_0x%08x:%d <-> %d_0x%08x:%d\n", 
-			fd, 
-			soinf2->fd, ntohl(soinf2->my_addr), ntohs(soinf2->my_port),
-			soinf2->peer_fd, ntohl(soinf2->peer_addr), ntohs(soinf2->peer_port));
+		fprintf_pos(stderr, "INFO connect soinf updated fd=%d %s\n", fd, soinf->c_str());
+		fprintf_pos(stderr, "INFO connect soinf_peer    fd=%d %s\n", fd, soinf_peer->c_str());
+		fprintf_pos(stderr, "INFO connect soinf2        fd=%d %s\n", fd, soinf2->c_str());
 	}
 
 
@@ -1187,9 +1173,7 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 
 
 	// isto kot v connect - samo ce imas sendto, potem lahko connect preskocis ...
-	fprintf_pos(stderr, "INFO fd=%d me %d_0x%08x:%d <-> %d_0x%08x:%d\n", fd, 
-		soinf->fd, ntohl(soinf->my_addr), ntohs(soinf->my_port),
-		soinf->peer_fd, ntohl(soinf->peer_addr), ntohs(soinf->peer_port));
+	fprintf_pos(stderr, "INFO fd=%d me   %s\n", fd, soinf->c_str());
 	/*int aa,bb,cc;
 	aa = so_bypass_possible(soinf, soinf->my_port);
 	bb = so_bypass_possible(soinf, peer_port);
@@ -1209,9 +1193,7 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 		return 0;
 	}
 	peer_fd = soinf_peer->fd; */
-	fprintf_pos(stderr, "INFO fd=%d peer %d_0x%08x:%d <-> %d_0x%08x:%d\n", fd, 
-		soinf_peer->fd, ntohl(soinf_peer->my_addr), ntohs(soinf_peer->my_port),
-		soinf_peer->peer_fd, ntohl(soinf_peer->peer_addr), ntohs(soinf_peer->peer_port));
+	fprintf_pos(stderr, "INFO fd=%d peer %s\n", fd, soinf_peer->c_str());
 
 
 
@@ -1234,10 +1216,6 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	// razen, morda, ce vsi pocnejo samo sendto.
 	// Meh, iperf client - tu zavpije
  	//assert(soinf_peer->fd == soinf->peer_fd);
-
-	fprintf_pos(stderr, "fd=%d me %d_0x%08x:%d peer %d_0x%08x:%d\n", fd,
-		soinf->fd, ntohl(soinf->my_addr), ntohs(soinf->my_port),
-		soinf_peer->fd, ntohl(soinf_peer->my_addr), ntohs(soinf_peer->my_port));
 
 	assert(soinf_peer->is_bypass);
 	assert(soinf_peer->ring_buf.data);
