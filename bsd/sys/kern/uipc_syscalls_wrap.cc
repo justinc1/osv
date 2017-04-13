@@ -52,9 +52,12 @@
 int getsock_cap(int fd, struct file **fpp, u_int *fflagp);
 
 
-#if 1
+#if 0
 #  undef fprintf_pos
 #  define fprintf_pos(...) /**/
+#  define SENDTO_BYPASS_USLEEP(x)
+#else
+#  define SENDTO_BYPASS_USLEEP(x) usleep(x)
 #endif
 #if 0
 #  undef assert
@@ -74,7 +77,7 @@ int getsock_cap(int fd, struct file **fpp, u_int *fflagp);
 static mutex mtx_ipbypass;
 #endif
 
-pid_t ipbypass_tid0 = 1000000;;
+pid_t ipbypass_tid0 = 1000000;
 
 uint32_t my_ip_addr = 0x00000000;
 // all sockets
@@ -88,6 +91,8 @@ inline void* my_memcpy_memmove(void *dest, const void *src, size_t n) {
 	return memmove(dest, src, n);
 }
 
+//extern "C" int socket(int domain, int type, int protocol);
+int (*socket_func)(int, int, int) = nullptr;
 
 // return true if SBS_CANTRCVMORE in so->so_rcv.sb_state is set
 // use in poll-for-data loop to exit without data, when socet get closed while we are already waiting for data.
@@ -146,8 +151,9 @@ public:
 	ushort peer_port;
 	int peer_fd; // ker je iskanje prevec fff
 
-	// fd returned by accept. the descriptor is allocated by connecting peer.
-	int accept_fd;
+	// accept_soinf->fd is fd returned by accept. the descriptor fd is allocated by accepting peer,
+	// peer_* values are set by connecting peer.
+	sock_info *accept_soinf;
 };
 
 sock_info::sock_info() {
@@ -164,7 +170,7 @@ void sock_info::call_ctor() {
 	peer_addr = 0xFFFFFFFF;
 	peer_port = 0;
 	peer_fd = -1;
-	accept_fd = -1;
+	accept_soinf = nullptr;
 }
 
 void sock_info::call_dtor() {
@@ -462,6 +468,7 @@ int accept4(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__restrict 
 int accept_bypass(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__restrict len, int *fd2)
 {
 	*fd2 = -1;
+	fprintf_pos(stderr, "BUMP fd=%d fd2=%d\n", fd, *fd2);
 	sock_info *soinf = sol_find(fd);
 	if (soinf == nullptr) {
 		fprintf_pos(stderr, "ERROR fd=%d not found\n", fd);
@@ -470,6 +477,18 @@ int accept_bypass(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__res
 	if (!soinf->is_bypass) {
 		return 0;
 	}
+
+
+	*fd2 = socket_func(PF_INET, SOCK_STREAM, IPPROTO_TCP); // get a VALID fd - for sbwait()
+	sock_info *soinf2 = sol_find(*fd2);
+	fprintf_pos(stderr, "to-be-accepted fd=%d fd2=%d, soinf2=%p\n", fd, *fd2, soinf2);
+	// ukradi stanje od soinf
+	soinf2->my_addr = my_ip_addr; //soinf->my_addr; // soinf->my_addr == 0.0.0.0, tipicno. Medtem ko client ve, kam klice.
+	soinf2->my_port = soinf->my_port;
+	soinf2->bypass(soinf2->my_addr, soinf2->my_port, -1); // Kje poslusam jaz, vem. Kdo se bo gor povezal, pa ne vem, zato peer fd = -1.
+	//
+	soinf->accept_soinf = soinf2;
+
 
 	// kdor se povezuje name, bo nastavil peer fd,addr,port.
 	do {
@@ -484,15 +503,11 @@ int accept_bypass(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__res
 	} while (/*soinf->peer_fd < 0 &&
 		(soinf->peer_addr == 0xFFFFFFFF || soinf->peer_addr == 0x00000000) &&
 		soinf->peer_port == 0 &&*/
-		soinf->accept_fd < 0);
+		soinf->accept_soinf->peer_fd < 0);
+	// nehaj sprejemati nove povezave
+	soinf->accept_soinf = nullptr;
 
-	// zdaj bi moral vrniti nov fd za nov socket
-	// ajde, probam starega
-	*fd2 = fd;
-	// samo potem se najbrz tepe recv_from iz dveh koncev ali kaj.
-	// bi bilo najbolje, ce bi imel neki soifn2 ze vnaprej alociran. oz ce bi ga peer connect alociral.
-	*fd2 = soinf->accept_fd;
-	soinf->accept_fd = -1;
+	// zdaj moram vrniti nov fd za nov socket, tj *fd2
 
 	return 0;
 }
@@ -503,6 +518,7 @@ int accept(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__restrict l
 	int fd2, error;
 
 	sock_d("accept(fd=%d, ...)", fd);
+	fprintf_pos(stderr, "BUMP fd=%d\n", fd);
 
 	error = accept_bypass(fd, addr, len, &fd2);
 	if(error) {
@@ -621,9 +637,6 @@ linux_bind(int s, void *name, int namelen)
 
 	return 0;
 }
-
-//extern "C" int socket(int domain, int type, int protocol);
-int (*socket_func)(int, int, int) = nullptr;
 
 // PA ze v bind treba bypass prizgati, ce se le da...
 extern "C"
@@ -761,28 +774,26 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 
 		// TODO TCP daj nastiv se za peer_fd, da bo accept_bypass sel naprej
 		// setup also peer, so that tcp accept_bypass continues
-	//	static int last_fd2 = 1000;
-		int fd2;
-	//	fd2 = last_fd2++;
-		fd2 = socket_func(PF_INET, SOCK_STREAM, IPPROTO_TCP); // get a VALID fd - for sbwait()
-		fprintf_pos(stderr, "connecting fd=%d to peer->fd=%d, on new peer->accept_fd=%d\n", fd, soinf_peer->fd, fd2);
-	//	 sol_insert(fd2, 0 /* 0 == tcp ? */);
-		sock_info *soinf2 = sol_find(fd2);
+		while(soinf_peer->accept_soinf == nullptr) {
+			fprintf_pos(stderr, "INFO waiting on soinf_peer->accept_soinf to be valid...\n", "");
+			usleep(10); // ker server mogoce se ni svoje priprave za accept koncal.
+		}
+		assert(soinf_peer->accept_soinf != nullptr);
+		fprintf_pos(stderr, "connecting fd=%d to peer->fd=%d, on new peer->accept_soinf->fd=%d\n", fd, soinf_peer->fd, soinf_peer->accept_soinf->fd);
+		sock_info *soinf2 = soinf_peer->accept_soinf;
 		// ukradi stanje od soinf
-		soinf2->my_addr = soinf->peer_addr; // soinf_peer->my_addr == 0.0.0.0, tipicno. Medtem ko client ve, kam klice.
-		soinf2->my_port = soinf_peer->my_port;
-		/*soinf2->peer_fd = soinf->fd;
+		// soinf2->my_addr = soinf->peer_addr; // soinf_peer->my_addr == 0.0.0.0, tipicno. Medtem ko client ve, kam klice.
+		assert(soinf2->my_addr == 0 || soinf2->my_addr == -1 || soinf2->my_addr == soinf->peer_addr); // pricakujem, da je enako, vem pa ne
+		soinf2->my_addr = soinf->peer_addr;
+		assert(soinf2->my_port == soinf_peer->my_port);
+		//soinf2->peer_fd = soinf->fd; // ta je nazadnje
 		soinf2->peer_addr = soinf->my_addr;
-		soinf2->peer_port = soinf->my_port;*/
-		soinf2->bypass(soinf->my_addr, soinf->my_port, soinf->fd);
+		soinf2->peer_port = soinf->my_port;
 
 		// popravi se sebe
-			//soinf->peer_fd = peer_fd;
-			//soinf->peer_addr = peer_addr;
-			//soinf->peer_port = peer_port;
-		soinf->peer_fd = fd2;
+		soinf->peer_fd = soinf2->fd;
 		// cisto nazadnje
-		soinf_peer->accept_fd = fd2;
+		soinf2->peer_fd = fd; // == soinf_peer->accept_soinf->peer_fd , flag za cakanje
 
 		fprintf_pos(stderr, "INFO connect soinf updated fd=%d %d_0x%08x:%d <-> %d_0x%08x:%d\n", 
 			fd, 
@@ -796,7 +807,7 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 			fd, 
 			soinf2->fd, ntohl(soinf2->my_addr), ntohs(soinf2->my_port),
 			soinf2->peer_fd, ntohl(soinf2->peer_addr), ntohs(soinf2->peer_port));
-		}
+	}
 
 
 	return 0;
@@ -1120,6 +1131,7 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	//
 	SOCK_UNLOCK(so);
 	fdrop(fp); /* TODO PAZI !!! */
+SENDTO_BYPASS_USLEEP(1000*200);
 	return len2;
 
 	/*
