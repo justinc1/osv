@@ -80,6 +80,7 @@ static mutex mtx_ipbypass;
 pid_t ipbypass_tid0 = 1000000;
 
 uint32_t my_ip_addr = 0x00000000;
+uint32_t my_owner_id = 0;
 // all sockets
 class sock_info;
 std::vector<sock_info*> so_list;
@@ -118,11 +119,16 @@ bool check_sock_flags(int fd) {
 
 /*--------------------------------------------------------------------------*/
 
+// addr is in network byte order
+uint32_t ipv4_addr_to_id(uint32_t addr) {
+	return ntohl(addr) & 0xFF;
+}
+
 class sock_info {
 public:
 	sock_info();
 	//void bypass(uint32_t peer_addr=0xFFFFFFFF, ushort peer_port=0, int peer_fd=-1);
-	void bypass(uint32_t peer_addr, ushort peer_port, int peer_fd);
+	void bypass(uint32_t peer_id, uint32_t peer_addr, ushort peer_port, int peer_fd);
 	size_t data_push(const void* buf, size_t len);
 	size_t data_pop(void* buf, size_t len, short *so_rcv_state=nullptr);
 public:
@@ -131,6 +137,7 @@ public:
     static sock_info* alloc_ivshmem();
     void free_ivshmem();
 public:
+	uint32_t my_id; // VM owner id
 	int fd;
 	bool is_bypass;
     std::atomic<bool> modified;
@@ -149,6 +156,7 @@ public:
 	uint32_t my_addr;
 	ushort my_port;
 	// peer this socket is connected to. Note - our peer can be connected by/from multiple clients.
+	uint32_t peer_id;
 	uint32_t peer_addr;
 	ushort peer_port;
 	int peer_fd; // ker je iskanje prevec fff
@@ -164,6 +172,8 @@ sock_info::sock_info() {
 
 void sock_info::call_ctor() {
 	ring_buf.call_ctor();
+	my_id = 0;
+	peer_id = 0;
 	fd = -1;
 	is_bypass = false;
 	modified = false;
@@ -198,9 +208,10 @@ void sock_info::free_ivshmem() {
     ivshmem_dt(this);
 }
 
-void sock_info::bypass(uint32_t _peer_addr, ushort _peer_port, int _peer_fd) {
+void sock_info::bypass(uint32_t _peer_id, uint32_t _peer_addr, ushort _peer_port, int _peer_fd) {
 	if (!is_bypass) {
 		is_bypass = true;
+		peer_id = _peer_id;
 		peer_addr = _peer_addr;
 		peer_port = _peer_port;
 		peer_fd = _peer_fd;
@@ -208,9 +219,9 @@ void sock_info::bypass(uint32_t _peer_addr, ushort _peer_port, int _peer_fd) {
 		ring_buf.alloc(BYPASS_BUF_SZ);
 		//fprintf_pos(stderr, "INFO fd=%d, in_buf size=%d capacity=%d reserve=%d\n",
 		//	fd, in_buf.size(), in_buf.capacity(), in_buf.reserve() );
-		fprintf_pos(stderr, "INFO fd=%d this=%p is_bypass=%d peer fd=%d,addr=0x%08x,port=%d\n",
+		fprintf_pos(stderr, "INFO fd=%d this=%p is_bypass=%d peer id=%d,fd=%d,addr=0x%08x,port=%d\n",
 			fd, this, is_bypass, 
-			peer_fd, ntohl(peer_addr), ntohs(peer_port));
+			peer_id, peer_fd, ntohl(peer_addr), ntohs(peer_port));
 	}
 }
 
@@ -260,6 +271,7 @@ void sol_insert(int fd, int protocol) {
 	fprintf(stderr, "INSERT-ing fd=%d soinf=%p\n", fd, soinf);
 	if (soinf == nullptr)
 		return;
+	soinf->my_id = my_owner_id;
 	soinf->fd = fd;
 	soinf->my_proto = protocol;
 	so_list.push_back(soinf);
@@ -486,9 +498,10 @@ int accept_bypass(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__res
 	sock_info *soinf2 = sol_find(*fd2);
 	fprintf_pos(stderr, "to-be-accepted fd=%d fd2=%d, soinf2=%p\n", fd, *fd2, soinf2);
 	// ukradi stanje od soinf
+	soinf2->my_id = soinf->my_id;
 	soinf2->my_addr = my_ip_addr; //soinf->my_addr; // soinf->my_addr == 0.0.0.0, tipicno. Medtem ko client ve, kam klice.
 	soinf2->my_port = soinf->my_port;
-	soinf2->bypass(soinf2->my_addr, soinf2->my_port, -1); // Kje poslusam jaz, vem. Kdo se bo gor povezal, pa ne vem, zato peer fd = -1.
+	soinf2->bypass(0, soinf2->my_addr, soinf2->my_port, -1); // Kje poslusam jaz, vem. Kdo se bo gor povezal, pa ne vem, zato peer fd = -1.
 	//
 	soinf->accept_soinf = soinf2;
 
@@ -578,6 +591,7 @@ int bind(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	}
 	assert(len2 == sizeof(addr2));
 	in_addr = (sockaddr_in*)(void*)&addr2;
+	assert(soinf->my_id == my_owner_id);
 	soinf->my_addr = in_addr->sin_addr.s_addr;
 	soinf->my_port = in_addr->sin_port;
 	fprintf_pos(stderr, "fd=%d me (from getsockname) %d_0x%08x:%d\n", fd, fd, ntohl(soinf->my_addr), ntohs(soinf->my_port));
@@ -593,7 +607,7 @@ int bind(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	   ) {
 		fprintf_pos(stderr, "INFO fd=%d me %d_0x%08x:%d try to bypass\n", 
 			fd, soinf->fd, ntohl(soinf->my_addr), ntohs(soinf->my_port));
-		soinf->bypass(0xFFFFFFFF, 0, -1);
+		soinf->bypass(0, 0xFFFFFFFF, 0, -1);
 	}
 	else {
 		fprintf_pos(stderr, "INFO fd=%d me %d_0x%08x:%d bypass not possible\n", 
@@ -668,6 +682,7 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	uint32_t peer_addr = in_addr->sin_addr.s_addr;
 	ushort peer_port = in_addr->sin_port;
 	int peer_fd = -1;
+	uint32_t peer_id = ipv4_addr_to_id(peer_addr);
 	sock_info *soinf_peer = nullptr;
 	//bool do_linux_connect = true;
 	fprintf_pos(stderr, "INFO connect fd=%d peer addr=0x%08x,port=%d\n", fd, ntohl(peer_addr), ntohs(peer_port));
@@ -713,12 +728,13 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		if(soinf->is_bypass) {
 			fprintf_pos(stderr, "INFO already bypass-ed fd me/peer %d %d.\n", fd, peer_fd);
 			// hja, zdaj pa is_bypass je ze true, peer_* pa na defualt vrednostih . jej jej jej. 
+			soinf->peer_id = peer_id;
 			soinf->peer_fd = peer_fd;
 			soinf->peer_addr = peer_addr;
 			soinf->peer_port = peer_port;
 		}
 		else {
-			soinf->bypass(peer_addr, peer_port, peer_fd);
+			soinf->bypass(peer_id, peer_addr, peer_port, peer_fd);
 		}
 	}
 	else {
@@ -790,6 +806,7 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		soinf2->my_addr = soinf->peer_addr;
 		assert(soinf2->my_port == soinf_peer->my_port);
 		//soinf2->peer_fd = soinf->fd; // ta je nazadnje
+		soinf2->peer_id = soinf->my_id;
 		soinf2->peer_addr = soinf->my_addr;
 		soinf2->peer_port = soinf->my_port;
 
@@ -1094,6 +1111,7 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 		return 0;
 	}
 
+	uint32_t peer_id = 0;
 	uint32_t peer_addr = 0xFFFFFFFF;
 	ushort peer_port = 0;
 	int peer_fd = -1;
@@ -1107,8 +1125,10 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 		peer_addr = soinf->peer_addr;
 		peer_port = soinf->peer_port;
 	}
+	peer_id = ipv4_addr_to_id(peer_addr);
 
 	assert(peer_addr != 0xFFFFFFFF && peer_port != 0);
+	assert(peer_id != 0);
 	// OK, peer seems to be known and our.
 
 	fprintf_pos(stderr, "fd=%d connecting to peer_addr=0x%08x peer_port=%d\n", fd, ntohl(peer_addr), ntohs(peer_port));
@@ -1521,6 +1541,7 @@ void ipbypass_setup() {
 	fprintf_pos(stderr, "TADA...\n", "");
 	//sleep(1);
 	my_ip_addr = get_ipv4_addr();
+	my_owner_id = ipv4_addr_to_id(my_ip_addr);
 	so_list.reserve(10);
 
 	socket_func = socket;
