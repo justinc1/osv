@@ -137,6 +137,8 @@ public:
     void call_dtor();
     static sock_info* alloc_ivshmem();
     void free_ivshmem();
+    std::string str();
+    const char* c_str();
 public:
 	uint32_t my_id; // VM owner id
 	int fd;
@@ -185,6 +187,24 @@ void sock_info::call_ctor() {
 	peer_port = 0;
 	peer_fd = -1;
 	accept_soinf = nullptr;
+}
+
+std::string sock_info::str() {
+	char desc[1024]="";
+	if(this) {
+		snprintf(desc, sizeof(desc), "%d:%d_0x%08x:%d<-->%d:%d_0x%08x:%d",
+			my_id, fd, ntohl(my_addr), ntohs(my_port),
+			peer_id, peer_fd, ntohl(peer_addr), ntohs(peer_port)
+			);
+	}
+	else {
+		snprintf(desc, sizeof(desc), "(nullptr)");
+	}
+	return std::string(desc);
+}
+
+const char* sock_info::c_str() {
+	return str().c_str();
 }
 
 void sock_info::call_dtor() {
