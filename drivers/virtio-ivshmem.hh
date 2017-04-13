@@ -18,6 +18,8 @@
 
 extern "C" long gettid();
 
+#define SOCK_INFO_LIST_LEN 10
+
 namespace virtio {
 
 class ivshmem : public virtio_driver {
@@ -68,6 +70,8 @@ extern "C" {
 int ivshmem_get(size_t size);
 void* ivshmem_at(int id);
 int ivshmem_dt(void* data);
+
+void* get_layout_ivm___so_list();
 }
 
 #endif

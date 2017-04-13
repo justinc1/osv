@@ -83,7 +83,8 @@ uint32_t my_ip_addr = 0x00000000;
 uint32_t my_owner_id = 0;
 // all sockets
 class sock_info;
-std::vector<sock_info*> so_list;
+typedef sock_info* so_list_t[SOCK_INFO_LIST_LEN];
+so_list_t* so_list = nullptr;
 
 inline void* my_memcpy_memcpy(void *dest, const void *src, size_t n) {
 	return memcpy(dest, src, n);
@@ -274,8 +275,20 @@ void sol_insert(int fd, int protocol) {
 	soinf->my_id = my_owner_id;
 	soinf->fd = fd;
 	soinf->my_proto = protocol;
-	so_list.push_back(soinf);
-	fprintf(stderr, "INSERT-ed fd=%d soinf=%p\n", fd, soinf);
+	// TODO - add VM owner_id
+	int ii;
+	for (ii = 0; so_list && ii < SOCK_INFO_LIST_LEN; ii++) {
+		fprintf(stderr, "INSERT-search so_list[%d]=%p\n", ii, (*so_list)[ii]);
+		if ((*so_list)[ii] == nullptr) {
+			(*so_list)[ii] = soinf;
+			break;
+		}
+	}
+	if (ii == SOCK_INFO_LIST_LEN) {
+		fprintf(stderr, "ERROR sol_insert inserting fd=%d soinf=%p, all slots used :/\n", fd, soinf);
+		exit(1);
+	}
+	fprintf(stderr, "INSERT-ed fd=%d soinf=%p at so_list[%d]=%p\n", fd, soinf, ii, &((*so_list)[ii]));
 }
 
 void sol_remove(int fd, int protocol) {
@@ -283,8 +296,10 @@ void sol_remove(int fd, int protocol) {
 	return;
 	sleep(10);
 	// TODO a bi moral tudi peer-a removati?
-	for (auto it = so_list.begin(); it != so_list.end(); ) {
-		sock_info *soinf = *it;
+	int ii;
+	for (ii = 0; so_list && ii < SOCK_INFO_LIST_LEN; ii++) {
+		sock_info *soinf = (*so_list)[ii];
+		// TODO - check VM owner_id
 		if (soinf && soinf->fd == fd) {
 
 			//so_list.erase(it); // invalidira vse iteratorje. predvsem sam it iteratero..........
@@ -295,23 +310,27 @@ void sol_remove(int fd, int protocol) {
 			// treba se malo pavze, da ta-drugi-thread neha dostopati (iperf client neha posiljati)
 			// std::shared_ptr
 			sleep(1);
-			*it = nullptr;
+			(*so_list)[ii] = nullptr;
 			
 
-			fprintf_pos(stderr, "DELETE-ed fd=%d soinf=%p\n", fd, soinf);
+			fprintf_pos(stderr, "DELETE-ed fd=%d soinf=%p at ii=%d\n", fd, soinf, ii);
 			memset(soinf, 0x00, sizeof(*soinf));
 			soinf->free_ivshmem();
 		}
 		else {
-			it++;
+			//it++;
 		}
 	}
 }
 
 sock_info* sol_find(int fd) {
-	auto it = std::find_if(so_list.begin(), so_list.end(), 
+//	auto it = std::find_if(so_list.begin(), so_list.end(),
+	if (so_list == nullptr)
+		return nullptr;
+	auto it = std::find_if(std::begin(*so_list), std::end(*so_list),
 		[&] (sock_info *soinf) { return soinf && soinf->fd == fd; } );
-	if (it == so_list.end()) {
+//	if (it == so_list.end()) {
+	if (it == std::end(*so_list)) {
 		if(fd>5) {
 			//fprintf_pos(stderr, "ERROR fd=%d not found\n", fd);
 		}
@@ -321,21 +340,25 @@ sock_info* sol_find(int fd) {
 }
 
 sock_info* sol_find_me(int fd, uint32_t my_addr, ushort my_port) {
-	auto it = std::find_if(so_list.begin(), so_list.end(), 
+	if (so_list == nullptr)
+		return nullptr;
+	auto it = std::find_if(std::begin(*so_list), std::end(*so_list),
 		[&] (sock_info *soinf) { 
 			// protocol pa kar ignoriram, jejhetaja.
 			return 	soinf && 
 					(soinf->my_addr == INADDR_ANY || soinf->my_addr == my_addr) &&
 					(soinf->my_port == my_port);
 		});
-	if (it == so_list.end()) {
+	if (it == std::end(*so_list)) {
 		fprintf_pos(stderr, "ERROR fd=%d me 0x%08x:%d not found\n", fd, ntohl(my_addr), ntohs(my_port));
 		return nullptr;
 	}
 	return *it;
 }
 sock_info* sol_find_peer2(int fd, uint32_t peer_addr, ushort peer_port) {
-	auto it = std::find_if(so_list.begin(), so_list.end(), 
+	if (so_list == nullptr)
+		return nullptr;
+	auto it = std::find_if(std::begin(*so_list), std::end(*so_list),
 		[&] (sock_info *soinf) {
 			if (!soinf)
 				return false; 
@@ -348,7 +371,7 @@ sock_info* sol_find_peer2(int fd, uint32_t peer_addr, ushort peer_port) {
 				(peer_addr == INADDR_ANY); // tale pogoj bo pa napacen. ker zdaj bi 
 			return addr_match && (soinf->peer_port == peer_port);
 		});
-	if (it == so_list.end()) {
+	if (it == std::end(*so_list)) {
 		fprintf_pos(stderr, "ERROR fd=%d peer 0x%08x:%d not found\n", fd, ntohl(peer_addr), ntohs(peer_port));
 		return nullptr;
 	}
@@ -1078,9 +1101,17 @@ void* bypass_scanner(void *args) {
 	bool modified;
 	int len2;
 	fprintf(stderr, "bypass_scanner START, args=%p\n", args);
+
 	while (1) {
+		if (so_list == nullptr) {
+			sleep(1);
+			continue;
+		}
 		len2 = 0;
-		for (auto soinf:so_list) {
+		sock_info *soinf;
+		int ii;
+		for (ii = 0; ii < SOCK_INFO_LIST_LEN; ii++) {
+			soinf = (*so_list)[ii];
 			if(soinf == nullptr)
 				continue;
 			modified = soinf->modified.load(std::memory_order_relaxed);
@@ -1542,7 +1573,15 @@ void ipbypass_setup() {
 	//sleep(1);
 	my_ip_addr = get_ipv4_addr();
 	my_owner_id = ipv4_addr_to_id(my_ip_addr);
-	so_list.reserve(10);
+
+	// so_list je skupna za vse VM . NE SME VSAKA VM DOBITI SVOJE z ivshmem_get/at !!!
+	/*
+	int shmid = ivshmem_get_tag(sizeof(sock_info* [SOCK_INFO_LIST_LEN]), "some-tag");
+	if (shmid != -1) {
+	    so_list = (sock_info* (*)[SOCK_INFO_LIST_LEN]) ivshmem_at(shmid);
+	}*/
+	so_list = (sock_info* (*)[SOCK_INFO_LIST_LEN]) get_layout_ivm___so_list();
+	// NE, to sme samo "prva" VM. memset((void*)so_list, 0x00, sizeof(*so_list));
 
 	socket_func = socket;
 

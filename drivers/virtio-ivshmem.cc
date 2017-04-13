@@ -42,6 +42,7 @@ ivshmem::ivshmem(pci::device& pci_dev)
     bar->map();
     _data = (void*)bar->get_mmio();
     _size = bar->read_bar_size();
+    debug("virtio-ivshmem: size=%d at addr=%p\n", _size, _data);
 
 #if 0
 #define OFFSET (1024*64)
@@ -237,6 +238,7 @@ typedef struct {
         char __dummy_data[INTERVM_SIZE];
         struct { 
             ivm_lock lock;
+            void* so_list[SOCK_INFO_LIST_LEN];
             char ivm_data[INTERVM_SIZE-sizeof(ivm_lock)];
         } ivm2;
     } ivm;
@@ -252,6 +254,14 @@ static ivshmem_layout* get_layout()
         return nullptr;
     ivshmem_layout* layout = (ivshmem_layout*)s_ivshmem->get_data();
     return layout;
+}
+
+void* get_layout_ivm___so_list()
+{
+    ivshmem_layout* layout = get_layout();
+    if (!layout)
+        return nullptr;
+    return layout->ivm.ivm2.so_list;
 }
 
 static void* get_layout_shm_data()
