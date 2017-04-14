@@ -7,9 +7,12 @@
 #include <lockfree/ring_buffer.hh>
 
 // SBS_CANTRCVMORE
-#ifndef SBS_CANTRCVMORE
-#define	SBS_CANTRCVMORE		0x0020	/* can't receive more data from peer */
-#endif // SBS_CANTRCVMORE
+//#ifndef SBS_CANTRCVMORE
+//#define	SBS_CANTRCVMORE		0x0020	/* can't receive more data from peer */
+//#endif // SBS_CANTRCVMORE
+
+// sock_info.flags
+#define SOR_CLOSED 0x0001
 
 class RingMessageHdr {
 public:
@@ -30,7 +33,7 @@ public:
 	~RingBufferV0();
 	void alloc(size_t len);
 	size_t push(const void* buf, size_t len);
-	size_t pop(void* buf, size_t len, short *so_rcv_state=nullptr);
+	size_t pop(void* buf, size_t len, short *flags=nullptr);
 public:
 	size_t available_read();
 	size_t available_write();
@@ -39,7 +42,7 @@ public:
 	size_t push_tcp(const void* buf, size_t len);
 	size_t pop_part(void* buf, size_t len);
 	size_t pop_udp(void* buf, size_t len);
-	size_t pop_tcp(void* buf, size_t len, short *so_rcv_state=nullptr);
+	size_t pop_tcp(void* buf, size_t len, short *flags=nullptr);
 public:
 	char* data;
 	size_t length;
@@ -111,10 +114,10 @@ public:
 		wpos_cum2 += ret;
 		return ret;
 	}
-	size_t pop(void* buf, size_t len, short *so_rcv_state=nullptr) {
+	size_t pop(void* buf, size_t len, short *flags=nullptr) {
 		size_t ret;
 		while (0 == (ret = ring_buffer_spsc::pop(buf, len))) {
-			if (so_rcv_state && (*so_rcv_state & SBS_CANTRCVMORE)) {
+			if (flags && (*flags & SOR_CLOSED)) {
 				// cantrecv is set, socket was closed while reading
 				break;
 			}

@@ -131,7 +131,7 @@ public:
 	//void bypass(uint32_t peer_addr=0xFFFFFFFF, ushort peer_port=0, int peer_fd=-1);
 	void bypass(uint32_t peer_id, uint32_t peer_addr, ushort peer_port, int peer_fd);
 	size_t data_push(const void* buf, size_t len);
-	size_t data_pop(void* buf, size_t len, short *so_rcv_state=nullptr);
+	size_t data_pop(void* buf, size_t len /*, short *so_rcv_state=nullptr*/);
 public:
     void call_ctor();
     void call_dtor();
@@ -140,6 +140,7 @@ public:
     std::string str();
     const char* c_str();
 public:
+	short flags; // my state etc
 	uint32_t my_id; // VM owner id
 	int fd;
 	bool is_bypass;
@@ -175,6 +176,7 @@ sock_info::sock_info() {
 
 void sock_info::call_ctor() {
 	ring_buf.call_ctor();
+	flags = 0;
 	my_id = 0;
 	peer_id = 0;
 	fd = -1;
@@ -264,7 +266,7 @@ size_t sock_info::data_push(const void* buf, size_t len) {
 	return ring_buf.push(buf, len);
 }
 
-size_t sock_info::data_pop(void* buf, size_t len, short *so_rcv_state) {
+size_t sock_info::data_pop(void* buf, size_t len/*, short *so_rcv_state*/) {
 	/*while (in_buf.size() <= 0) {
 		// TODO atomicnost datagramov
 		usleep(1000*1200);
@@ -283,7 +285,7 @@ size_t sock_info::data_pop(void* buf, size_t len, short *so_rcv_state) {
 #if IPBYPASS_LOCKED
 	SCOPE_LOCK(mtx_ipbypass);
 #endif
-	return ring_buf.pop(buf, len, so_rcv_state);
+	return ring_buf.pop(buf, len, &flags);
 }
 
 
@@ -987,9 +989,20 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 		fprintf_pos(stderr, "fd=%d so_state=0x%x so->so_rcv.sb_state=0x%x available_read=%d\n",
 			fd, so->so_state, so->so_rcv.sb_state, available_read);
 		// if (so->so_state == SS_ISDISCONNECTED) {
+#if 0
 		if (available_read == 0 &&
 			so->so_rcv.sb_state & SBS_CANTRCVMORE) { // TODO
 			fprintf_pos(stderr, "fd=%d so_state=0x%x SS_ISDISCONNECTED  so->so_rcv.sb_state=0x%x SBS_CANTRCVMORE=0x%x\n", fd, so->so_state, so->so_rcv.sb_state, SBS_CANTRCVMORE);
+			//errno = ENOTCONN;
+			errno = EINTR; // to be netperf friendly
+			//SOCK_UNLOCK(so);
+			fdrop(fp); /* TODO PAZI !!! */
+			return -1; // -errno
+		}
+#endif
+		if (available_read == 0 &&
+			(soinf->flags & SOR_CLOSED)) { // TODO
+			fprintf_pos(stderr, "fd=%d soinf->flags=0x%x SOR_CLOSED\n", fd, soinf->flags);
 			//errno = ENOTCONN;
 			errno = EINTR; // to be netperf friendly
 			//SOCK_UNLOCK(so);
@@ -1010,14 +1023,19 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 	//sleep(1);
 	//available_read = soinf->ring_buf.available_read();
 	fprintf_pos(stderr, "fd=%d available_read=%d\n", fd, available_read);
+
+#if 0
+	// zgleda, da netserver to razume kot napako, in zapre oba svoja socketa
 	if (available_read == 0) {
 		// to je npr na drugi strani zaprt socket
 		//TODO mozno, da mi pokvari kak drug primer (blocking read etc...)
 		fprintf_pos(stderr, "fd=%d SKIP reading available_read=%d\n", fd, available_read);
 		return 0;
 	}
+#endif
+
 	//SOCK_UNLOCK(so); // ker data_pop caka na podatke
-	len2 = soinf->data_pop(buf, len, so_rcv_state);
+	len2 = soinf->data_pop(buf, len/*, so_rcv_state*/);
 	fprintf_pos(stderr, "fd=%d data_pop len2=%d\n", fd, len2);
 
 	SOCK_LOCK(so);  // ce dam stran: Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
@@ -1559,13 +1577,19 @@ nastavi CANTRECVMORE flag, da ne bo netperf.so caka na branje is socketa, ki ga 
 	sock_info *soinf_peer = nullptr;
 	/* vsaj za tcp, bi to zdaj ze moral biti povezano*/
 	//int peer_fd = soinf->peer_fd;
-	soinf_peer = sol_find(soinf->peer_fd);
-	if(!soinf_peer || !soinf_peer->is_bypass) {
-		return 0;
-	}
+	soinf_peer = sol_find_peer(soinf->peer_fd, soinf->peer_addr, soinf->peer_port, false); //allow_inaddr_any=false, bo najbrz ok. Saj ce poslusam, nimam pravega peer-a
 
 	set_cantrecvanymore(fd);
-	//set_cantrecvanymore(soinf->peer_fd); /// TEGA PA NE MOREM tuji VM narediti...
+	soinf->flags |= SOR_CLOSED;
+	fprintf_pos(stderr, "fd=%d soinf=%p      flags=%p 0x%04x\n", fd, soinf, &soinf->flags, (int)soinf->flags);
+
+	if(soinf_peer && soinf_peer->is_bypass) {
+		//set_cantrecvanymore(soinf->peer_fd); /// TEGA PA NE MOREM tuji VM narediti...
+		soinf_peer->flags |= SOR_CLOSED;
+		fprintf_pos(stderr, "fd=%d soinf_peer=%p flags=%p 0x%04x\n", fd, soinf_peer, &soinf_peer->flags, (int)soinf_peer->flags);
+		// Now notify peer
+		soinf_peer->modified.store(true, std::memory_order_release);
+	}
 	return 0;
 }
 
