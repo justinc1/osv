@@ -52,7 +52,7 @@
 int getsock_cap(int fd, struct file **fpp, u_int *fflagp);
 
 
-#if 0
+#if 1
 #  undef fprintf_pos
 #  define fprintf_pos(...) /**/
 #  define SENDTO_BYPASS_USLEEP(x)
@@ -331,7 +331,7 @@ void sol_remove(int fd, int protocol) {
 			// fake delete, in se vedno crashne
 			// treba se malo pavze, da ta-drugi-thread neha dostopati (iperf client neha posiljati)
 			// std::shared_ptr
-			sleep(1);
+			sleep(0);
 			(*so_list)[ii] = nullptr;
 			
 
@@ -869,9 +869,12 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 
 		// TODO TCP daj nastiv se za peer_fd, da bo accept_bypass sel naprej
 		// setup also peer, so that tcp accept_bypass continues
+		int loop_flag = 0;
 		while(soinf_peer->accept_soinf == nullptr) {
-			fprintf_pos(stderr, "INFO waiting on soinf_peer->accept_soinf to be valid...\n", "");
-			usleep(10); // ker server mogoce se ni svoje priprave za accept koncal.
+			if(loop_flag == 0)
+				fprintf_pos(stderr, "INFO waiting on soinf_peer->accept_soinf to be valid...\n", "");
+			usleep(0); // ker server mogoce se ni svoje priprave za accept koncal.
+			loop_flag = 1;
 		}
 		assert(soinf_peer->accept_soinf != nullptr);
 		fprintf_pos(stderr, "connecting fd=%d to peer->fd=%d, on new peer->accept_soinf->fd=%d\n", fd, soinf_peer->fd, soinf_peer->accept_soinf->fd);
@@ -1186,14 +1189,14 @@ void* bypass_scanner(void *args) {
 			modified = soinf->modified.load(std::memory_order_relaxed);
 			if (modified) {
 		        soinf->modified.store(false, std::memory_order_release);
-		        len2 = 1;
+		        len2 = 1; //32k
 				fprintf_pos(stderr, "fd=%d soinf=%p is modified, WAKE UP\n", soinf->fd, soinf);
 		        wake_foreigen_socket(soinf->fd, len2);
 			}
 		}
 		if (len2 == 0) {
 			// no socket was modified, sleep a bit
-			usleep(1000);
+			usleep(0);
 		}
 	}
 	fprintf(stderr, "bypass_scanner DONE, args=%p\n", args);
