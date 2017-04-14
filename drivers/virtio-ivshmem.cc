@@ -135,24 +135,49 @@ size_t ivshmem::get_size()
 
 class ivshmem_segment {
 public:
-    void* data;
-    size_t size;
+    int id;
     int ref_count;
+    void* data; // TODO change to offset
+    size_t size;
     //bool delete_flag;
 
     ivshmem_segment();
-    bool intersect(void* data0, size_t size0);
+    bool intersect(void* data0, size_t size0) const;
+    void remove();
+    bool unused() const;
 };
 
-ivshmem_segment::ivshmem_segment()
+void ivshmem_segment::remove()
 {
+    id = 0; // 0, da je zacetno stanje /dev/shm/ivshmem primerno
     data = nullptr;
     size = 0;
     ref_count = 0;
     //delete_flag = false;
 }
 
-bool ivshmem_segment::intersect(void* data0, size_t size0)
+ivshmem_segment::ivshmem_segment()
+{
+    remove();
+}
+
+bool ivshmem_segment::unused() const
+{
+    bool is_unused = id == 0;
+    if (is_unused) {
+        assert(ref_count == 0);
+        assert(data == nullptr);
+        assert(size == 0);
+    }
+    else {
+        assert(ref_count >= 0); // ker sele shmat poveca refcount. Po shmget je enak 0.
+        assert(data != nullptr);
+        assert(size > 0);
+    }
+    return is_unused;
+}
+
+bool ivshmem_segment::intersect(void* data0, size_t size0) const
 {
     /*
     To not intersect, data0 and (data0+size0) have to both smaller
@@ -211,7 +236,8 @@ void ivm_lock::unlock() {
 }
 
 
-static std::map<int, ivshmem_segment> s_segments;
+//static std::map<int, ivshmem_segment> s_segments;
+static ivshmem_segment* ivsegments = nullptr;
 
 extern "C" {
 
@@ -238,7 +264,9 @@ typedef struct {
         char __dummy_data[INTERVM_SIZE];
         struct { 
             ivm_lock lock;
+            ivshmem_segment ivsegments[IVSHMEM_SEGMENT_LIST_LEN];
             void* so_list[SOCK_INFO_LIST_LEN];
+
             char ivm_data[INTERVM_SIZE-sizeof(ivm_lock)];
         } ivm2;
     } ivm;
@@ -262,6 +290,14 @@ void* get_layout_ivm___so_list()
     if (!layout)
         return nullptr;
     return layout->ivm.ivm2.so_list;
+}
+
+ivshmem_segment* get_layout_ivm___ivsegments()
+{
+    ivshmem_layout* layout = get_layout();
+    if (!layout)
+        return nullptr;
+    return layout->ivm.ivm2.ivsegments;
 }
 
 static void* get_layout_shm_data()
@@ -295,6 +331,8 @@ static void intervm_setup() {
         ((char*)(void*)&ivm_lock::s_owner_id_base)[ii] = (char)rand();
     }
     debugf_ivshmem("IVSHMEM ivm_lock::s_owner_id_base=%llu %p\n", ivm_lock::s_owner_id_base, ivm_lock::s_owner_id_base);
+    ivsegments = get_layout_ivm___ivsegments();
+    debugf_ivshmem("IVSHMEM ivsegments=%p\n", ivsegments);
 
     // part involving write to the actual shared memory region.
     ivshmem_layout* layout = get_layout();
@@ -321,7 +359,7 @@ static void ivshmem_check() {
     }
 
     // Check guard pages
-    uint32_t ii;
+    uint32_t ii, jj;
     uint32_t *guard;
     ivshmem_layout* layout = get_layout();
     if (layout == nullptr)
@@ -336,13 +374,20 @@ static void ivshmem_check() {
     }
 
     // no overlap is allowed
-    for (auto it1=s_segments.begin(); it1!=s_segments.end(); ++it1) {
-        auto data1 = it1->second.data;
-        auto size1 = it1->second.size;
-        for (auto it2=s_segments.begin(); it2!=s_segments.end(); ++it2) {
-            if (it1 == it2)
+    //for (auto it1=s_segments.begin(); it1!=s_segments.end(); ++it1) {
+    for (ii=0; ii<IVSHMEM_SEGMENT_LIST_LEN; ii++) {
+        ivshmem_segment* ivseg1 = ivsegments + ii;
+        if (ivseg1->unused())
+            continue;
+        auto data1 = ivseg1->data;
+        auto size1 = ivseg1->size;
+        for (jj=0; jj<IVSHMEM_SEGMENT_LIST_LEN; jj++) {
+            if (ii == jj)
                 continue;
-            assert(!it2->second.intersect(data1, size1));
+            ivshmem_segment* ivseg2 = ivsegments + jj;
+            if (ivseg2->unused())
+                continue;
+            assert(!ivseg2->intersect(data1, size1));
         }
     }
 
@@ -385,12 +430,19 @@ int ivshmem_get(size_t size) {
 
     // search for free piece of mem
     void* data = get_layout_shm_data(); // Candidate used for first segment
-    for (auto it1=s_segments.begin(); it1!=s_segments.end(); ++it1) {
-        auto data1 = it1->second.data;
-        auto size1 = it1->second.size;
+    int ii, jj;
+    for (ii=0; ii<IVSHMEM_SEGMENT_LIST_LEN; ii++) {
+        ivshmem_segment* ivseg1 = ivsegments + ii;
+        if (ivseg1->unused())
+            continue;
+        auto data1 = ivseg1->data;
+        auto size1 = ivseg1->size;
         data = data1 + size1; // Candidate for to-be-allocated area, next byte after it1
-        for (auto it2=s_segments.begin(); it2!=s_segments.end(); ++it2) {
-            if(it2->second.intersect(data, size)) {
+        for (jj=0; jj<IVSHMEM_SEGMENT_LIST_LEN; jj++) {
+            ivshmem_segment* ivseg2 = ivsegments + jj;
+            if (ivseg2->unused())
+                continue;
+            if (ivseg2->intersect(data, size)) {
                 data = nullptr; // mark candidate as not-usable 
                 break;
             }
@@ -412,17 +464,33 @@ int ivshmem_get(size_t size) {
         return -1;
     }
     // acceptable candidate found
-    int id;
-    if (s_segments.size() == 0) {
-        id = 0;
+    int id = 1;
+    // find highest unused id
+    for (ii=0; ii<IVSHMEM_SEGMENT_LIST_LEN; ii++) {
+        ivshmem_segment* ivseg1 = ivsegments + ii;
+        if (ivseg1->unused())
+            continue;
+        id = max(id, ivseg1->id + 1);
     }
-    else {
-        id = s_segments.rbegin()->first + 1;
+    // find free slot
+    ivshmem_segment* ivseg1 = nullptr;
+    for (ii=0; ii<IVSHMEM_SEGMENT_LIST_LEN; ii++) {
+        ivseg1 = ivsegments + ii;
+        if (ivsegments[ii].unused()) {
+            ivseg1 = ivsegments + ii;
+            break;
+        }
     }
-    ivshmem_segment iseg;
-    iseg.data = data;
-    iseg.size = size;
-    s_segments[id] = iseg;
+    if (ivseg1 == nullptr) {
+        debugf_ivshmem("IVSHMEM get no free slot to store segment info\n");
+        IVM_LOCK_OBJ_UNLOCK();
+        errno = ENOMEM;
+        return -1;
+    }
+    ivseg1->id = id;
+    ivseg1->data = data;
+    ivseg1->size = size;
+    ivseg1->ref_count = 0;
     debugf_ivshmem("IVSHMEM get id=%d data=%p size=%d=%p\n", id, data, size, size);
     IVM_LOCK_OBJ_UNLOCK();
     return id;
@@ -431,29 +499,41 @@ int ivshmem_get(size_t size) {
 void* ivshmem_at(int id) {
     IVM_LOCK_OBJ_LOCK();
     ivshmem_check();
-    auto it = s_segments.find(id);
-    if (it == s_segments.end()) {
+    ivshmem_segment* ivseg1;
+    int ii;
+    for (ii=0; ii<IVSHMEM_SEGMENT_LIST_LEN; ii++) {
+        ivseg1 = ivsegments + ii;
+        if (ivseg1->unused())
+            continue;
+        if (ivseg1->id == id)
+            break;
+    }
+    if (ii == IVSHMEM_SEGMENT_LIST_LEN) {
         debugf_ivshmem("IVSHMEM at id=%d not found\n", id);
         IVM_LOCK_OBJ_UNLOCK();
         errno = EINVAL;
         return (void*) (-1);
     }
-    it->second.ref_count++;
-    debugf_ivshmem("IVSHMEM at id=%d data=%p size=%d=%p ref_count=%d\n", id, it->second.data, it->second.size, it->second.size, it->second.ref_count);
+    ivseg1->ref_count++;
+    debugf_ivshmem("IVSHMEM at id=%d data=%p size=%d=%p ref_count=%d\n", id, ivseg1->data, ivseg1->size, ivseg1->size, ivseg1->ref_count);
     IVM_LOCK_OBJ_UNLOCK();
-    return it->second.data;
+    return ivseg1->data;
 }
 
 int ivshmem_dt(void* data) {
     IVM_LOCK_OBJ_LOCK();
     ivshmem_check();
-    for (auto it=s_segments.begin(); it!=s_segments.end(); ++it) {
-        if(it->second.data == data) {
-            it->second.ref_count--;
-            debugf_ivshmem("IVSHMEM dt id=%d data=%p size=%d=%p ref_count=%d\n", it->first, it->second.data, it->second.size, it->second.size, it->second.ref_count);
-            if (it->second.ref_count == 0) {
-                debugf_ivshmem("IVSHMEM dt id=%d removed\n", it->first);
-                s_segments.erase(it);
+    int ii;
+    for (ii=0; ii<IVSHMEM_SEGMENT_LIST_LEN; ii++) {
+        ivshmem_segment* ivseg1 = ivsegments + ii;
+        if (ivseg1->unused())
+            continue;
+        if (ivseg1->data == data) {
+            ivseg1->ref_count--;
+            debugf_ivshmem("IVSHMEM dt id=%d data=%p size=%d=%p ref_count=%d\n", ivseg1->id, ivseg1->data, ivseg1->size, ivseg1->size, ivseg1->ref_count);
+            if (ivseg1->ref_count == 0) {
+                debugf_ivshmem("IVSHMEM dt id=%d removed\n", ivseg1->id);
+                ivsegments[ii].remove();
             }
             IVM_LOCK_OBJ_UNLOCK();
             return 0;

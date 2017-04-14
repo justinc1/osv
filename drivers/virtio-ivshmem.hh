@@ -19,6 +19,7 @@
 extern "C" long gettid();
 
 #define SOCK_INFO_LIST_LEN 10
+#define IVSHMEM_SEGMENT_LIST_LEN 1024
 
 namespace virtio {
 
