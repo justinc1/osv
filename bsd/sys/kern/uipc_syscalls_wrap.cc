@@ -571,12 +571,16 @@ int accept_bypass(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__res
 	*fd2 = socket_func(PF_INET, SOCK_STREAM, IPPROTO_TCP); // get a VALID fd - for sbwait()
 	sock_info *soinf2 = sol_find(*fd2);
 	fprintf_pos(stderr, "to-be-accepted fd=%d fd2=%d, soinf2=%p\n", fd, *fd2, soinf2);
+	    //fprintf(stderr, "to-be-accepted AAA fd=%d fd2=%d, soinf2=%p %s\n", fd, *fd2, soinf2, soinf2->c_str());
 	// ukradi stanje od soinf
 	soinf2->my_id = soinf->my_id;
 	soinf2->my_addr = my_ip_addr; //soinf->my_addr; // soinf->my_addr == 0.0.0.0, tipicno. Medtem ko client ve, kam klice.
 	soinf2->my_port = soinf->my_port;
 	soinf2->bypass(0, 0xFFFFFFFF, 0, -1); // Kje poslusam jaz, vem. Kdo se bo gor povezal, pa ne vem, zato peer fd = -1, in enako vse ostalo od peer-a.
 	//
+	    //fprintf(stderr, "to-be-accepted BBB fd=%d fd2=%d, soinf2=%p %s\n", fd, *fd2, soinf2, soinf2->c_str());
+	assert(soinf2->peer_fd == -1); // kar preverja prejemnik/client
+	//usleep(10000);
 	soinf->accept_soinf = soinf2;
 
 
@@ -594,6 +598,7 @@ int accept_bypass(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__res
 		(soinf->peer_addr == 0xFFFFFFFF || soinf->peer_addr == 0x00000000) &&
 		soinf->peer_port == 0 &&*/
 		soinf->accept_soinf->peer_fd < 0);
+		//(*(volatile int*)(void*)&(soinf->accept_soinf->peer_fd)) < 0);
 	// nehaj sprejemati nove povezave
 	soinf->accept_soinf = nullptr;
 
@@ -869,6 +874,7 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		assert(soinf_peer->accept_soinf != nullptr);
 		fprintf_pos(stderr, "connecting fd=%d to peer->fd=%d, on new peer->accept_soinf->fd=%d\n", fd, soinf_peer->fd, soinf_peer->accept_soinf->fd);
 		sock_info *soinf2 = soinf_peer->accept_soinf;
+		assert(soinf2->peer_fd == -1);
 		// ukradi stanje od soinf
 		// soinf2->my_addr = soinf->peer_addr; // soinf_peer->my_addr == 0.0.0.0, tipicno. Medtem ko client ve, kam klice.
 		assert(soinf2->my_addr == 0 || soinf2->my_addr == -1 || soinf2->my_addr == soinf->peer_addr); // pricakujem, da je enako, vem pa ne
