@@ -300,6 +300,7 @@ void sol_insert(int fd, int protocol) {
 		fprintf(stderr, "INSERT-search so_list[%d]=%p soinf=%s\n", ii, (*so_list)[ii], (*so_list)[ii]->c_str());
 		if ((*so_list)[ii] == nullptr) {
 			(*so_list)[ii] = soinf;
+			fprintf(stderr, "INSERT-ed     so_list[%d]=%p soinf=%s\n", ii, (*so_list)[ii], (*so_list)[ii]->c_str());
 			break;
 		}
 	}
@@ -307,14 +308,14 @@ void sol_insert(int fd, int protocol) {
 		fprintf(stderr, "ERROR sol_insert inserting fd=%d soinf=%p, all slots used :/\n", fd, soinf);
 		exit(1);
 	}
-	fprintf(stderr, "INSERT-ed fd=%d soinf=%p at so_list[%d]=%p soinf=%s\n", fd, soinf, ii, &((*so_list)[ii]), soinf->c_str());
 }
 
 void sol_remove(int fd, int protocol) {
 	fprintf_pos(stderr, "DELETE-ing fd=%d\n", fd);
-	return;
-	sleep(10);
+	//return;
+	//sleep(10);
 	// TODO a bi moral tudi peer-a removati?
+	// Oz, kako naj peer-u povem, da naj pocisti?? En GC-like thread, ki remove unreachable?
 	int ii;
 	for (ii = 0; so_list && ii < SOCK_INFO_LIST_LEN; ii++) {
 		sock_info *soinf = (*so_list)[ii];
@@ -1516,7 +1517,7 @@ int shutdown(int fd, int how)
 	fprintf_pos(stderr, "fd=%d\n", fd);
 
 	sol_print(fd);
-    sol_remove(fd, -1);
+    //sol_remove(fd, -1); // ampak, ce je socket shutdown, se se vedno lahko bere iz njega.
 
 	// Try first if it's a AF_LOCAL socket (af_local.cc), and if not
 	// fall back to network sockets. TODO: do this more cleanly.
