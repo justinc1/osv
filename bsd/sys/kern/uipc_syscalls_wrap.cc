@@ -292,10 +292,9 @@ void sol_insert(int fd, int protocol) {
 	fprintf(stderr, "INSERT-ing fd=%d soinf=%p\n", fd, soinf);
 	if (soinf == nullptr)
 		return;
-	soinf->my_id = my_owner_id;
+	soinf->my_id = my_owner_id; // tu je vedno moj VM id
 	soinf->fd = fd;
 	soinf->my_proto = protocol;
-	// TODO - add VM owner_id
 	int ii;
 	for (ii = 0; so_list && ii < SOCK_INFO_LIST_LEN; ii++) {
 		fprintf(stderr, "INSERT-search so_list[%d]=%p soinf=%s\n", ii, (*so_list)[ii], (*so_list)[ii]->c_str());
@@ -320,7 +319,7 @@ void sol_remove(int fd, int protocol) {
 	for (ii = 0; so_list && ii < SOCK_INFO_LIST_LEN; ii++) {
 		sock_info *soinf = (*so_list)[ii];
 		// TODO - check VM owner_id
-		if (soinf && soinf->fd == fd) {
+		if (soinf && soinf->my_id == my_owner_id && soinf->fd == fd) {
 
 			//so_list.erase(it); // invalidira vse iteratorje. predvsem sam it iteratero..........
 			//*it = nullptr; // fake delete
@@ -348,7 +347,7 @@ sock_info* sol_find(int fd) {
 	if (so_list == nullptr)
 		return nullptr;
 	auto it = std::find_if(std::begin(*so_list), std::end(*so_list),
-		[&] (sock_info *soinf) { return soinf && soinf->fd == fd; } );
+		[&] (sock_info *soinf) { return soinf && soinf->my_id == my_owner_id && soinf->fd == fd; } );
 //	if (it == so_list.end()) {
 	if (it == std::end(*so_list)) {
 		if(fd>5) {
@@ -359,13 +358,14 @@ sock_info* sol_find(int fd) {
 	return *it;
 }
 
-sock_info* sol_find_me(int fd, uint32_t my_addr, ushort my_port) {
+sock_info* XXX_sol_find_me(int fd, uint32_t my_addr, ushort my_port) {
 	if (so_list == nullptr)
 		return nullptr;
 	auto it = std::find_if(std::begin(*so_list), std::end(*so_list),
 		[&] (sock_info *soinf) { 
 			// protocol pa kar ignoriram, jejhetaja.
 			return 	soinf && 
+					(soinf->my_id == my_owner_id) &&
 					(soinf->my_addr == INADDR_ANY || soinf->my_addr == my_addr) &&
 					(soinf->my_port == my_port);
 		});
@@ -375,6 +375,36 @@ sock_info* sol_find_me(int fd, uint32_t my_addr, ushort my_port) {
 	}
 	return *it;
 }
+
+/*
+Isci peer-a, ki poslusa na podanem addr:port.
+*/
+sock_info* sol_find_peer(int fd, uint32_t peer_addr, ushort peer_port, bool allow_inaddr_any) {
+	if (so_list == nullptr)
+		return nullptr;
+	uint32_t peer_id = ipv4_addr_to_id(peer_addr);
+	auto it = std::find_if(std::begin(*so_list), std::end(*so_list),
+		[&] (sock_info *soinf) {
+			// protocol pa kar ignoriram, jejhetaja.
+			bool is_addr_ok;
+			if (allow_inaddr_any) {
+				is_addr_ok = soinf->my_addr == peer_addr || soinf->my_addr == INADDR_ANY;
+			}
+			else {
+				is_addr_ok = soinf->my_addr == peer_addr;
+			}
+			return 	soinf &&
+					(soinf->my_id == peer_id) &&
+					is_addr_ok &&
+					(soinf->my_port == peer_port);
+		});
+	if (it == std::end(*so_list)) {
+		fprintf_pos(stderr, "ERROR fd=%d peer %d:??_0x%08x:%d not found\n", fd, peer_id, ntohl(peer_addr), ntohs(peer_port));
+		return nullptr;
+	}
+	return *it;
+}
+
 sock_info* sol_find_peer2(int fd, uint32_t peer_addr, ushort peer_port) {
 	if (so_list == nullptr)
 		return nullptr;
@@ -730,7 +760,7 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	if ( (so_bypass_possible(soinf, soinf->my_port) ||
 		  so_bypass_possible(soinf, peer_port) ) &&
 		  (
-		  	(peer_addr == my_ip_addr) ||
+			(peer_addr == my_ip_addr) || true || /* peer_addr ni vec treba, da je moj - sedaj podpiramo dve VM */
 
 		  	// real-ip-stack ni videl paketa, ki ga je client poslal serverju.
 		  	// in zdaj se server ne more connect. No, med drugim je tu v *addr vse 0x00, ker 
@@ -752,7 +782,7 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		//sock_info *soinf_peer = sol_find_peer2(fd, peer_addr, peer_port);
 		if(peer_port != 0) {
 			// to je ok za UDP clienta - ta se poveze za znani server ip/port.
-			soinf_peer = sol_find_me(fd, peer_addr, peer_port);
+			soinf_peer = sol_find_peer(fd, peer_addr, peer_port, true); // client se povezuje na server
 		}
 		else {
 			// najbrz smo server, ki se povezuje nazaj na clienta.
@@ -973,6 +1003,12 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 	//sleep(1);
 	//available_read = soinf->ring_buf.available_read();
 	fprintf_pos(stderr, "fd=%d available_read=%d\n", fd, available_read);
+	if (available_read == 0) {
+		// to je npr na drugi strani zaprt socket
+		//TODO mozno, da mi pokvari kak drug primer (blocking read etc...)
+		fprintf_pos(stderr, "fd=%d SKIP reading available_read=%d\n", fd, available_read);
+		return 0;
+	}
 	//SOCK_UNLOCK(so); // ker data_pop caka na podatke
 	len2 = soinf->data_pop(buf, len, so_rcv_state);
 	fprintf_pos(stderr, "fd=%d data_pop len2=%d\n", fd, len2);
@@ -1120,6 +1156,8 @@ void* bypass_scanner(void *args) {
 			soinf = (*so_list)[ii];
 			if(soinf == nullptr)
 				continue;
+			if(soinf->my_id != my_owner_id)
+				continue;
 			modified = soinf->modified.load(std::memory_order_relaxed);
 			if (modified) {
 		        soinf->modified.store(false, std::memory_order_release);
@@ -1183,7 +1221,7 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	assert(soinf->is_bypass);
 	/* vsaj za tcp, bi to zdaj ze moral biti povezano*/
 	peer_fd = soinf->peer_fd;
-	soinf_peer = sol_find(soinf->peer_fd);
+	soinf_peer = sol_find_peer(soinf->peer_fd, peer_addr, peer_port, false); // should be already connected. TODO - kaj pa ce poslusa na specific IP? Potem bom spet napacen sock_info nasel. Bo reba kar extra flag, ali pa s pointerji povezati.
 	assert(soinf_peer && soinf_peer->is_bypass);
 
 	// tole je bilo za udp
@@ -1515,12 +1553,12 @@ nastavi CANTRECVMORE flag, da ne bo netperf.so caka na branje is socketa, ki ga 
 	/* vsaj za tcp, bi to zdaj ze moral biti povezano*/
 	//int peer_fd = soinf->peer_fd;
 	soinf_peer = sol_find(soinf->peer_fd);
-	if(!soinf_peer->is_bypass) {
+	if(!soinf_peer || !soinf_peer->is_bypass) {
 		return 0;
 	}
 
 	set_cantrecvanymore(fd);
-	set_cantrecvanymore(soinf->peer_fd);
+	//set_cantrecvanymore(soinf->peer_fd); /// TEGA PA NE MOREM tuji VM narediti...
 	return 0;
 }
 
@@ -1582,6 +1620,12 @@ void ipbypass_setup() {
 	// NE, to sme samo "prva" VM. memset((void*)so_list, 0x00, sizeof(*so_list));
 
 	socket_func = socket;
+	// za debug, naj ima 2nd VM druge fd-je
+	if (my_owner_id == 91) {
+		for (int ii=0; ii<10; ii++) {
+			fopen("/", "r");
+		}
+	}
 
 	pthread_t pthread;
 	void* args = NULL;
