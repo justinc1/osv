@@ -69,6 +69,7 @@ int getsock_cap(int fd, struct file **fpp, u_int *fflagp);
 //#define RingBuffer RingBufferV0
 #define RingBuffer RingBuffer_atomic
 
+#define IPBYPASS_ENABLED 1
 #define IPBYPASS_LOCKED 0
 #define MEM_BARRIER 
 	//asm volatile("" ::: "memory")
@@ -431,9 +432,10 @@ sock_info* sol_find_peer2(int fd, uint32_t peer_addr, ushort peer_port) {
 	return *it;
 }
 bool so_bypass_possible(sock_info* soinf, ushort port) {
-	
-	//return false;
-	
+#if IPBYPASS_ENABLED == 0
+	return false;
+#endif
+
 	bool do_bypass=false;
 	// instead of searching for intra-host VMs, use bypass for magic port numbers only
 	// iperf - port 5001
@@ -617,6 +619,7 @@ int accept(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__restrict l
 	sock_d("accept(fd=%d, ...)", fd);
 	fprintf_pos(stderr, "BUMP fd=%d\n", fd);
 
+#if IPBYPASS_ENABLED
 	error = accept_bypass(fd, addr, len, &fd2);
 	if(error) {
 		errno = error;
@@ -625,6 +628,7 @@ int accept(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__restrict l
 	if (fd2 != -1) {
 		return fd2;
 	}
+#endif
 
 	error = linux_accept(fd, addr, len, &fd2);
 	if (error) {
@@ -649,6 +653,10 @@ int bind(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		errno = error;
 		return -1;
 	}
+
+#if IPBYPASS_ENABLED == 0
+	return 0;
+#endif
 
 	sock_info *soinf = sol_find(fd);
 	if (soinf == nullptr) {
@@ -741,6 +749,7 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	int error;
 
 	sock_d("connect(fd=%d, ...)", fd);
+#if IPBYPASS_ENABLED
 	fprintf_pos(stderr, "INFO connect fd=%d\n", fd);
 
 	// if we connect to intra-host VM, use bypass
@@ -837,20 +846,23 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	}
 	fprintf(stderr, "INFO linux_connect fd=%d to in_addr 0x%08x:%d\n",
 		fd, ntohl(in_addr->sin_addr.s_addr), ntohs(in_addr->sin_port));
+#endif
 
 	error = linux_connect(fd, (void *)addr, len);
 	if (error) {
 		sock_d("connect() failed, errno=%d", error);
 		fprintf_pos(stderr, "ERROR connect() failed, errno=%d\n", error);
 		errno = error;
-		//return -1;
-
+#if IPBYPASS_ENABLED == 0
+		return -1;
+#endif
 		// no, pa dajmo probati to na tiho ignorirati :/
 		// sej je samo mali iperf server problem....
 		fprintf(stderr, "ERROR connect() failed, errno=%d NA TIHEM IGNORIRAM< da bo vsaj iperf server nekaj lahko vrnil. Tudi ce potem crashne...\n", error);
 		return 0;
 	}
 
+#if IPBYPASS_ENABLED
 	// ce se ne poznam moje addr/port
 	//int getsockname(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 	if (soinf->my_port == 0 || soinf->my_addr == 0xFFFFFFFF || soinf->my_addr == 0x00000000) {
@@ -899,7 +911,7 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		fprintf_pos(stderr, "INFO connect soinf_peer    fd=%d %s\n", fd, soinf_peer->c_str());
 		fprintf_pos(stderr, "INFO connect soinf2        fd=%d %s\n", fd, soinf2->c_str());
 	}
-
+#endif
 
 	return 0;
 }
@@ -1310,8 +1322,9 @@ ssize_t sendto(int fd, const void *buf, size_t len, int flags,
 	ssize_t bytes;
 
 	sock_d("sendto(fd=%d, buf=..., len=%d, flags=0x%x, ...", fd, len, flags);
-	fprintf_pos(stderr, "INFO sendto fd=%d len=%d\n", fd, len);
 
+#if IPBYPASS_ENABLED
+	fprintf_pos(stderr, "INFO sendto fd=%d len=%d\n", fd, len);
 	ssize_t len2 = sendto_bypass(fd, buf, len, flags, addr, alen);
 	if (len2) {
 		// a ce vsaj en paket posljme, bo potem lahko server se en connect naredil ?? Please please please...
@@ -1320,6 +1333,7 @@ ssize_t sendto(int fd, const void *buf, size_t len, int flags,
 
 		return len2;
 	}
+#endif
 
 	error = linux_sendto(fd, (caddr_t)buf, len, flags, (caddr_t)addr,
 			   alen, &bytes);
@@ -1569,6 +1583,7 @@ so_state
 netperf zapre socket, potem pa proba prebrati se  zadnje ostanke.
 nastavi CANTRECVMORE flag, da ne bo netperf.so caka na branje is socketa, ki ga je sam zaprl.
 */
+#if IPBYPASS_ENABLED
  	sock_info *soinf = sol_find(fd);
 	fprintf_pos(stderr, "fd=%d soinf=%p %d\n", fd, soinf, soinf?soinf->fd:-1);
 	if(!soinf) {
@@ -1593,6 +1608,7 @@ nastavi CANTRECVMORE flag, da ne bo netperf.so caka na branje is socketa, ki ga 
 		// Now notify peer
 		soinf_peer->modified.store(true, std::memory_order_release);
 	}
+#endif
 	return 0;
 }
 
@@ -1610,7 +1626,9 @@ int socket(int domain, int type, int protocol) /**/
 		return -1;
 	}
 
+#if IPBYPASS_ENABLED
 	sol_insert(s, protocol);
+#endif
 	return s;
 }
 
@@ -1639,6 +1657,11 @@ uint32_t get_ipv4_addr() {
 }
 
 void ipbypass_setup() {
+#if IPBYPASS_ENABLED == 0
+	fprintf_pos(stderr, "SKIP ipbypass_setup\n", "");
+	return;
+#endif
+
 	fprintf_pos(stderr, "TADA...\n", "");
 	//sleep(1);
 	my_ip_addr = get_ipv4_addr();
