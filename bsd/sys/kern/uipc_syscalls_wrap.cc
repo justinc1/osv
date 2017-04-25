@@ -1083,7 +1083,7 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
  	sock_info *soinf = sol_find(fd);
 	//fprintf_pos(stderr, "soinf=%p %d\n", soinf, soinf?soinf->fd:-1);
 	assert(soinf && soinf->is_bypass);
-	fprintf_pos(stderr, "fd=%d BYPASS-ed\n", fd);
+	fprintf_pos(stderr, "fd=%d len=%d BYPASS-ed\n", fd, len);
 
 	// ce sem od prejsnjega branja dobil dva pakate, potem sem dvakrat nastavil flag/event za sbwait.
 	// ampak sbwait() bo sedaj samo enkrat pocistil, 
@@ -1131,14 +1131,23 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 			return -1; // -errno
 		}
 #endif
-		if (available_read == 0 &&
-			(soinf->flags & SOR_CLOSED)) { // TODO
-			fprintf_pos(stderr, "fd=%d soinf->flags=0x%x SOR_CLOSED\n", fd, soinf->flags);
-			//errno = ENOTCONN;
-			errno = EINTR; // to be netperf friendly
-			//SOCK_UNLOCK(so);
-			fdrop(fp); /* TODO PAZI !!! */
-			return -1; // -errno
+		if (available_read == 0) {
+			if (soinf->flags & SOR_CLOSED) { // TODO
+				fprintf_pos(stderr, "fd=%d soinf->flags=0x%x SOR_CLOSED\n", fd, soinf->flags);
+				//errno = ENOTCONN;
+				errno = EINTR; // to be netperf friendly
+				//SOCK_UNLOCK(so);
+				fdrop(fp); /* TODO PAZI !!! */
+				return -1; // -errno
+			}
+			else {
+				// something for openmpi, see read_bytes at orte/mca/oob/tcp/oob_tcp_sendrecv.c:319
+				// Try to return EINTR, EAGAIN or EWOULDBLOCK
+				//usleep(1000*1000);
+				errno = EWOULDBLOCK;
+				fdrop(fp); /* TODO PAZI !!! */
+				return -1;
+			}
 		}
 	}
 
@@ -1337,7 +1346,7 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	//return len;
 
  	sock_info *soinf = sol_find(fd);
-	fprintf_pos(stderr, "fd=%d soinf=%p %d\n", fd, soinf, soinf?soinf->fd:-1);
+	fprintf_pos(stderr, "fd=%d len=%d soinf=%p %d\n", fd, len, soinf, soinf?soinf->fd:-1);
 	if(!soinf) {
 		return 0;
 	}
