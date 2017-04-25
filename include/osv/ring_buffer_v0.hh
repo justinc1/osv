@@ -12,7 +12,8 @@
 //#endif // SBS_CANTRCVMORE
 
 // sock_info.flags
-#define SOR_CLOSED 0x0001
+#define SOR_CLOSED          0x0001
+#define SOR_NONBLOCK        0x0100
 
 class RingMessageHdr {
 public:

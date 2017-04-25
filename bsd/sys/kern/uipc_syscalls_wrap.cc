@@ -503,6 +503,37 @@ bool soi_is_bypassed(sock_info* soinf) {
 	return soinf->is_bypass;
 }
 
+int soi_ioctl(int fd, u_long cmd, void *data) {
+	if(fd <= 2) return 0;
+
+	//fprintf_pos(stderr, "fd=%d soinf=%p %d\n", fd, soinf, soinf?soinf->fd:-1);
+	//fprintf(stderr, "soi_ioctl fd=%d cmd=%d\n", fd, cmd);
+	sock_info *soinf = sol_find(fd);
+	if (soinf == nullptr)
+		return 0;
+
+	switch(cmd) {
+		case FIONBIO:
+			if (data==nullptr) {
+				errno = EINVAL;
+				return -1;
+			}
+			bool enable;
+			enable  = *(int*)(data);
+			if (enable) {
+				soinf->flags |= SOR_NONBLOCK;
+			}
+			else {
+				soinf->flags &= ~SOR_NONBLOCK;
+			}
+			fprintf(stderr, "soi_ioctl fd=%d cmd=%d=FIONBIO, enable=%d, flags=0x%04x\n", fd, cmd, enable, soinf->flags);
+			break;
+		default:
+			break;
+		}
+	return 0;
+}
+
 bool fd_is_bypassed(int fd) {
 	sock_info *soinf = sol_find(fd);
 	//fprintf_pos(stderr, "soinf=%p %d\n", soinf, soinf?soinf->fd:-1);
@@ -1140,10 +1171,11 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 				fdrop(fp); /* TODO PAZI !!! */
 				return -1; // -errno
 			}
-			else {
+			else if (soinf->flags & SOR_NONBLOCK) {
 				// something for openmpi, see read_bytes at orte/mca/oob/tcp/oob_tcp_sendrecv.c:319
 				// Try to return EINTR, EAGAIN or EWOULDBLOCK
 				//usleep(1000*1000);
+				fprintf_pos(stderr, "fd=%d soinf->flags=0x%x SOR_NONBLOCK\n", fd, soinf->flags);
 				errno = EWOULDBLOCK;
 				fdrop(fp); /* TODO PAZI !!! */
 				return -1;

@@ -87,6 +87,7 @@ class sock_info;
 sock_info* sol_find(int fd);
 void sol_remove(int fd, int protocol);
 void sol_print(int fd);
+int soi_ioctl(int fd, u_long cmd, void *data);
 
 /*---------------------------------------------------------------------*/
 
@@ -539,6 +540,8 @@ int ioctl(int fd, unsigned long int request, ...)
     error = fget(fd, &fp);
     if (error)
         goto out_errno;
+
+    error = soi_ioctl(fd, request, arg);
 
     error = sys_ioctl(fp, request, arg);
     fdrop(fp);
