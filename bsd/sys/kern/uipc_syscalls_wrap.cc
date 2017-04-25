@@ -544,10 +544,48 @@ int getsockname(int sockfd, struct bsd_sockaddr *addr, socklen_t *addrlen)
 	int error;
 
 	sock_d("getsockname(sockfd=%d, ...)", sockfd);
+#if IPBYPASS_ENABLED
+	if (fd_is_bypassed(sockfd)) {
+		int fd = sockfd;
+		sock_info *soinf = sol_find(fd);
+		fprintf_pos(stderr, "fd=%d soinf=%p %d\n", fd, soinf, soinf?soinf->fd:-1);
+		if(!soinf) {
+			return 0;
+		}
+
+		struct sockaddr_in* in_addr;
+		in_addr = (sockaddr_in*)(void*)addr;
+		if (addrlen == nullptr || *addrlen < sizeof(struct sockaddr_in)) {
+			errno = EINVAL;
+			return -1;
+		}
+		in_addr->sin_addr.s_addr = soinf->my_addr;
+		in_addr->sin_port = soinf->my_port;
+
+		return 0;
+	}
+#endif
 
 	error = linux_getsockname(sockfd, addr, addrlen);
 	if (error) {
 		sock_d("getsockname() failed, errno=%d", error);
+		errno = error;
+		return -1;
+	}
+
+	return 0;
+}
+
+extern "C"
+int getsockname_orig(int sockfd, struct bsd_sockaddr *addr, socklen_t *addrlen)
+{
+	int error;
+
+	sock_d("getsockname_orig(sockfd=%d, ...)", sockfd);
+
+	error = linux_getsockname(sockfd, addr, addrlen);
+	if (error) {
+		sock_d("getsockname_orig() failed, errno=%d", error);
 		errno = error;
 		return -1;
 	}
@@ -561,6 +599,51 @@ int getpeername(int sockfd, struct bsd_sockaddr *addr, socklen_t *addrlen)
 	int error;
 
 	sock_d("getpeername(sockfd=%d, ...)", sockfd);
+#if IPBYPASS_ENABLED
+	if (fd_is_bypassed(sockfd)) {
+		int fd = sockfd;
+		sock_info *soinf = sol_find(fd);
+		fprintf_pos(stderr, "fd=%d soinf=%p %d\n", fd, soinf, soinf?soinf->fd:-1);
+		if(!soinf) {
+			return 0;
+		}
+		uint32_t peer_addr = soinf->peer_addr;
+		short peer_port = soinf->peer_port;
+		uint32_t peer_id = ipv4_addr_to_id(peer_addr);
+		int peer_fd = -1;
+		assert(peer_addr != 0xFFFFFFFF && peer_port != 0);
+		assert(peer_id != 0);
+		// OK, peer seems to be known and our.
+
+		fprintf_pos(stderr, "fd=%d connected with peer_addr=0x%08x peer_port=%d\n", fd, ntohl(peer_addr), ntohs(peer_port));
+
+		// isto kot v connect - samo ce imas sendto, potem lahko connect preskocis ...
+		fprintf_pos(stderr, "INFO fd=%d me   %s\n", fd, soinf->c_str());
+		/*int aa,bb,cc;
+		aa = so_bypass_possible(soinf, soinf->my_port);
+		bb = so_bypass_possible(soinf, peer_port);
+		cc = peer_addr == my_ip_addr;
+		fprintf_pos(stderr, "DBG abc %d %d %d\n", aa, bb, cc); */
+		sock_info *soinf_peer = nullptr;
+		assert(soinf->is_bypass);
+		/* vsaj za tcp, bi to zdaj ze moral biti povezano*/
+		peer_fd = soinf->peer_fd;
+		soinf_peer = sol_find_peer(soinf->peer_fd, peer_addr, peer_port, false); // should be already connected. TODO - kaj pa ce poslusa na specific IP? Potem bom spet napacen sock_info nasel. Bo reba kar extra flag, ali pa s pointerji povezati.
+		assert(soinf_peer && soinf_peer->is_bypass);
+		fprintf_pos(stderr, "INFO fd=%d peer %s\n", fd, soinf_peer->c_str());
+
+		struct sockaddr_in* in_addr;
+		in_addr = (sockaddr_in*)(void*)addr;
+		if (addrlen == nullptr || *addrlen < sizeof(struct sockaddr_in)) {
+			errno = EINVAL;
+			return -1;
+		}
+		in_addr->sin_addr.s_addr = soinf_peer->my_addr;
+		in_addr->sin_port = soinf_peer->my_port;
+
+		return 0;
+	}
+#endif
 
 	error = linux_getpeername(sockfd, addr, addrlen);
 	if (error) {
@@ -704,9 +787,9 @@ int bind(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	socklen_t len2 = sizeof(addr2);
 	int ret;
 	memset(&addr2, 0x00, len2);
-	ret = getsockname(fd, &addr2, &len2);
+	ret = getsockname_orig(fd, &addr2, &len2);
 	if(ret) {
-		fprintf_pos(stderr, "ERROR fd=%d getsockname erro ret=%d\n", fd, ret);
+		fprintf_pos(stderr, "ERROR fd=%d getsockname_orig erro ret=%d\n", fd, ret);
 		return -1;
 	}
 	assert(len2 == sizeof(addr2));
@@ -714,7 +797,7 @@ int bind(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	assert(soinf->my_id == my_owner_id);
 	soinf->my_addr = in_addr->sin_addr.s_addr;
 	soinf->my_port = in_addr->sin_port;
-	fprintf_pos(stderr, "fd=%d me (from getsockname) %s\n", fd, soinf->c_str());
+	fprintf_pos(stderr, "fd=%d me (from getsockname_orig) %s\n", fd, soinf->c_str());
 
 
 	// enable bypass for all server-side sockets.
@@ -896,18 +979,20 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 #if IPBYPASS_ENABLED
 	// ce se ne poznam moje addr/port
 	//int getsockname(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
+	fprintf_pos(stderr, "INFO soinf before-1: %s\n", soinf->c_str());
 	if (soinf->my_port == 0 || soinf->my_addr == 0xFFFFFFFF || soinf->my_addr == 0x00000000) {
 		struct bsd_sockaddr addr2;
 		socklen_t addr2_len = sizeof(addr2);
-		error = getsockname(fd, &addr2, &addr2_len);
+		error = getsockname_orig(fd, &addr2, &addr2_len);
 		if (error) {
-			sock_d("connect / getsockname() failed, error=%d", error);
-			fprintf_pos(stderr, "ERROR connect / getsockname() failed, error=%d\n", error);
+			sock_d("connect / getsockname_orig() failed, error=%d", error);
+			fprintf_pos(stderr, "ERROR connect / getsockname_orig() failed, error=%d\n", error);
 			return -1;
 		}
 		struct sockaddr_in* in_addr2 = (sockaddr_in*)(void*)&addr2;
 		soinf->my_addr = in_addr2->sin_addr.s_addr;
 		soinf->my_port = in_addr2->sin_port;
+		fprintf_pos(stderr, "INFO soinf after-1: %s\n", soinf->c_str());
 
 
 		// TODO TCP daj nastiv se za peer_fd, da bo accept_bypass sel naprej
