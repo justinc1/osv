@@ -466,6 +466,37 @@ size_t soi_data_len(int fd) {
 	return soinf->ring_buf.available_read();
 }
 
+bool soi_is_readable(int fd) {
+	sock_info *soinf = sol_find(fd);
+	if (soinf == nullptr)
+		return false;
+
+	size_t nbytes = soinf->ring_buf.available_read();
+	if (nbytes > 0)
+		return true;
+	// nekdo izvaja connect, in je nastavil  soinf->accept_soinf->peer_fd
+	if (soinf->accept_soinf && soinf->accept_soinf->peer_fd > -1)
+		return true;
+	// pa tisti, ki klice accept, obvisi, in bi ga kao treba zbuditi.
+	// naj be socket v accept kar vedno readable, pa je..
+	if (soinf->accept_soinf)
+		return true;
+
+	return false;
+}
+
+bool soi_is_writable(int fd) {
+	sock_info *soinf = sol_find(fd);
+	if (soinf == nullptr)
+		return false;
+
+	size_t nbytes = soinf->ring_buf.available_write();
+	if (nbytes > 0)
+		return true;
+
+	return false;
+}
+
 bool soi_is_bypassed(sock_info* soinf) {
 	if (!soinf)
 		return false;

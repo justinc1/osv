@@ -61,6 +61,18 @@ int _fdalloc(struct file *fp, int *newfd, int min_fd)
     return EMFILE;
 }
 
+int fd_from_file(struct file *fp)
+{
+    int fd;
+
+    for (fd = 0; fd < FDMAX; fd++) {
+        if (gfdt[fd].read() == fp)
+            return fd;
+    }
+
+    return -2;
+}
+
 extern "C"
 int getdtablesize(void)
 {

@@ -247,6 +247,10 @@ void file_setoffset(struct file *fp, off_t off);
 void fhold(struct file* fp);
 int fdrop(struct file* fp);
 
+// IP bypass code used fd as search key,
+// so we need to somehow get fd from struct file.
+int fd_from_file(struct file *fp);
+
 __END_DECLS
 
 /* Get fp from fd and increment refcount */

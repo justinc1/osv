@@ -3186,25 +3186,39 @@ sopoll_generic(struct socket *so, int events, struct ucred *active_cred,
 	return sopoll_generic_locked(so, events);
 }
 
+
+//size_t soi_data_len(int fd);
+bool soi_is_readable(int fd);
+bool soi_is_writable(int fd);
+//bool fd_is_bypassed(int fd);
+
 int
 sopoll_generic_locked(struct socket *so, int events)
 {
 	int revents = 0;
 
+	struct file* fp = so->fp;
+	int fd = fd_from_file(fp);
+
 	if (events & (POLLIN | POLLRDNORM))
 		if (soreadabledata(so)) /* KAJ pa ce tega nastavim ?? */
+			revents |= events & (POLLIN | POLLRDNORM);
+		if (soi_is_readable(fd))
 			revents |= events & (POLLIN | POLLRDNORM);
 
 	if (events & (POLLOUT | POLLWRNORM))
 		if (sowriteable(so))
 			revents |= events & (POLLOUT | POLLWRNORM);
+		if (soi_is_writable(fd)) {
+			revents |= events & (POLLOUT | POLLWRNORM);
+		}
 
 	if (events & (POLLPRI | POLLRDBAND))
 		if (so->so_oobmark || (so->so_rcv.sb_state & SBS_RCVATMARK))
 			revents |= events & (POLLPRI | POLLRDBAND);
 
 	if ((events & POLLINIGNEOF) == 0) {
-		if (so->so_rcv.sb_state & SBS_CANTRCVMORE) {
+		if (so->so_rcv.sb_state & SBS_CANTRCVMORE) { /* TODO */
 			revents |= events & (POLLIN | POLLRDNORM);
 			if (so->so_snd.sb_state & SBS_CANTSENDMORE)
 				revents |= POLLHUP;
