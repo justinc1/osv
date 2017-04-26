@@ -760,6 +760,22 @@ int accept_bypass(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__res
 	// nehaj sprejemati nove povezave
 	soinf->accept_soinf = nullptr;
 
+	// v addr se vpise peer addr:port
+	if (addr &&
+		*len >= sizeof(struct sockaddr_in)) {
+		memset(addr, 0x00, *len);
+		struct sockaddr_in* in_addr;
+		//struct sockaddr* in_addr;
+		in_addr = (sockaddr_in*)(void*)addr;
+		//addr->sa_family = AF_INET;
+		*(u_short *)(void*)addr = AF_INET; // linux has family as first short. Compare bsd_to_linux_sockaddr().
+		in_addr->sin_addr.s_addr = soinf2->peer_addr;
+		in_addr->sin_port = soinf2->peer_port;
+		*len = sizeof(struct sockaddr_in);
+		fprintf(stderr, "fd=%d Accepted conn we=0x%08x:%d from peer=0x%08x:%d\n", fd, 
+			ntohl(soinf2->my_addr), ntohs(soinf2->my_port), ntohl(soinf2->peer_addr), ntohs(soinf2->peer_port));
+	}
+
 	// zdaj moram vrniti nov fd za nov socket, tj *fd2
 
 	return 0;
