@@ -16,6 +16,8 @@
 #include "drivers/device.hh"
 #include <atomic>
 
+extern "C" long gettid();
+
 namespace virtio {
 
 class ivshmem : public virtio_driver {
