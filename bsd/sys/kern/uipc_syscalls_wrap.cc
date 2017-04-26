@@ -455,6 +455,15 @@ bool so_bypass_possible(sock_info* soinf, ushort port) {
 		// Potem pa kar naenkrar na 216. Nic kar naenkrat - odvisno je od stevila CPUjev, pognal sem z -c2 :/
 		do_bypass = true;
 	}
+
+	// blacklist port 8000 - REST api
+	if (port == htons(8000)) {
+		do_bypass = false;
+		soinf->is_bypass = false;
+		fprintf(stderr, "DO NOT BYPASS PORT 8000, soinf=%p %s\n", soinf, soinf->c_str());
+		fprintf_pos(stderr, "DO NOT BYPASS PORT 8000, soinf=%p %s\n", soinf, soinf->c_str());
+	}
+
 	return do_bypass;
 }
 
@@ -917,6 +926,14 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	int peer_fd = -1;
 	uint32_t peer_id = ipv4_addr_to_id(peer_addr);
 	sock_info *soinf_peer = nullptr;
+
+	// blacklist port 8000 - REST api
+	if (peer_port == htons(8000)) {
+		soinf->is_bypass = false;
+		fprintf_pos(stderr, "DO NOT BYPASS PORT 8000, soinf=%p %s\n", soinf, soinf->c_str());
+		goto do_linux_connect;
+	}
+
 	//bool do_linux_connect = true;
 	fprintf_pos(stderr, "INFO connect fd=%d peer addr=0x%08x,port=%d\n", fd, ntohl(peer_addr), ntohs(peer_port));
 	if ( (so_bypass_possible(soinf, soinf->my_port) ||
@@ -991,6 +1008,8 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	}
 	fprintf(stderr, "INFO linux_connect fd=%d to in_addr 0x%08x:%d\n",
 		fd, ntohl(in_addr->sin_addr.s_addr), ntohs(in_addr->sin_port));
+
+do_linux_connect:
 #endif
 
 	error = linux_connect(fd, (void *)addr, len);
@@ -1008,6 +1027,11 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	}
 
 #if IPBYPASS_ENABLED
+	if (soinf->is_bypass == false) {
+		// client port is blacklisted - 8000, we disabled bypass.
+		return 0;
+	}
+
 	// ce se ne poznam moje addr/port
 	//int getsockname(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 	fprintf_pos(stderr, "INFO soinf before-1: %s\n", soinf->c_str());
