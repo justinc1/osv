@@ -384,6 +384,7 @@ sock_info* XXX_sol_find_me(int fd, uint32_t my_addr, ushort my_port) {
 
 /*
 Isci peer-a, ki poslusa na podanem addr:port.
+stara varianta
 */
 sock_info* sol_find_peer(int fd, uint32_t peer_addr, ushort peer_port, bool allow_inaddr_any) {
 	if (so_list == nullptr)
@@ -410,6 +411,66 @@ sock_info* sol_find_peer(int fd, uint32_t peer_addr, ushort peer_port, bool allo
 	}
 	return *it;
 }
+
+/*
+Isci peer-a, ki poslusa na podanem addr:port.
+*/
+sock_info* sol_find_peer_listening(int fd, uint32_t peer_addr, ushort peer_port) {
+	if (so_list == nullptr)
+		return nullptr;
+	uint32_t peer_id = ipv4_addr_to_id(peer_addr);
+	auto it = std::find_if(std::begin(*so_list), std::end(*so_list),
+		[&] (sock_info *soinf) {
+			// protocol pa kar ignoriram, jejhetaja.
+			bool is_addr_ok;
+			is_addr_ok = soinf->my_addr == peer_addr || soinf->my_addr == INADDR_ANY;
+			return 	soinf &&
+					(soinf->my_id == peer_id) &&
+					is_addr_ok &&
+					(soinf->my_port == peer_port) &&
+					(soinf->peer_id == 0) &&
+					(soinf->peer_fd == -1) &&
+					(soinf->peer_addr == 0xFFFFFFFF) &&
+					(soinf->peer_port == 0);
+		});
+	if (it == std::end(*so_list)) {
+		fprintf_pos(stderr, "ERROR fd=%d peer %d:??_0x%08x:%d not found\n", fd, peer_id, ntohl(peer_addr), ntohs(peer_port));
+		return nullptr;
+	}
+	return *it;
+}
+
+/*
+Isci soinf, ki ustreza kriterijem.
+Npr peer-a, ki je povezan z mano, na podanem fd:addr:port.
+Pol input param je odvec za iskanje, ampak jih pa lahko preverim (peer fd bi moral biti cisto dovolj).
+*/
+sock_info* sol_find_full(int fd, uint32_t my_addr, ushort my_port,
+	int peer_fd, uint32_t peer_addr, ushort peer_port) {
+	if (so_list == nullptr)
+		return nullptr;
+	uint32_t my_id = ipv4_addr_to_id(my_addr);
+	uint32_t peer_id = ipv4_addr_to_id(peer_addr);
+	auto it = std::find_if(std::begin(*so_list), std::end(*so_list),
+		[&] (sock_info *soinf) {
+			// protocol pa kar ignoriram, jejhetaja.
+			return 	soinf &&
+					(soinf->my_id == my_id) &&
+					(soinf->fd == fd) &&
+					(soinf->my_addr == my_addr) &&
+					(soinf->my_port == my_port) &&
+					(soinf->peer_id == peer_id) &&
+					(soinf->peer_fd == peer_fd) &&
+					(soinf->peer_addr == peer_addr) &&
+					(soinf->peer_port == peer_port);
+		});
+	if (it == std::end(*so_list)) {
+		fprintf_pos(stderr, "ERROR fd=%d peer %d:??_0x%08x:%d not found\n", fd, peer_id, ntohl(peer_addr), ntohs(peer_port));
+		return nullptr;
+	}
+	return *it;
+}
+
 
 sock_info* sol_find_peer2(int fd, uint32_t peer_addr, ushort peer_port) {
 	if (so_list == nullptr)
@@ -986,7 +1047,7 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		//sock_info *soinf_peer = sol_find_peer2(fd, peer_addr, peer_port);
 		if(peer_port != 0) {
 			// to je ok za UDP clienta - ta se poveze za znani server ip/port.
-			soinf_peer = sol_find_peer(fd, peer_addr, peer_port, true); // client se povezuje na server
+			soinf_peer = sol_find_peer_listening(fd, peer_addr, peer_port); // client se povezuje na server
 		}
 		else {
 			// najbrz smo server, ki se povezuje nazaj na clienta.
@@ -1492,7 +1553,7 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	assert(soinf->is_bypass);
 	/* vsaj za tcp, bi to zdaj ze moral biti povezano*/
 	peer_fd = soinf->peer_fd;
-	soinf_peer = sol_find_peer(soinf->peer_fd, peer_addr, peer_port, false); // should be already connected. TODO - kaj pa ce poslusa na specific IP? Potem bom spet napacen sock_info nasel. Bo reba kar extra flag, ali pa s pointerji povezati.
+	soinf_peer = sol_find_full(soinf->peer_fd, peer_addr, peer_port, fd, soinf->my_addr, soinf->my_port); // should be already connected. TODO - kaj pa ce poslusa na specific IP? Potem bom spet napacen sock_info nasel. Bo reba kar extra flag, ali pa s pointerji povezati.
 	assert(soinf_peer && soinf_peer->is_bypass);
 
 	// tole je bilo za udp
