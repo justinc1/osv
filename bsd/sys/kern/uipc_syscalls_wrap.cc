@@ -1556,9 +1556,15 @@ ssize_t sendto(int fd, const void *buf, size_t len, int flags,
 	ssize_t len2 = sendto_bypass(fd, buf, len, flags, addr, alen);
 	if (len2) {
 		// a ce vsaj en paket posljme, bo potem lahko server se en connect naredil ?? Please please please...
-		error = linux_sendto(fd, (caddr_t)buf, len, flags, (caddr_t)addr,
-				   alen, &bytes);
+		// no, mogoce ok za netperf/iperf
+		// za redis pa ni ok, socket ostane redable, ker recvfrom_bypass vzame samo podatke iz ring_buffer, pravi socket pa preskocim.
+		// Torej bolje, da niti ne vpisujem. Hm, ne pomaga.
+		//error = linux_sendto(fd, (caddr_t)buf, len, flags, (caddr_t)addr,
+		//		   alen, &bytes);
 
+		return len2;
+	}
+	if (fd_is_bypassed(fd)) {
 		return len2;
 	}
 #endif
