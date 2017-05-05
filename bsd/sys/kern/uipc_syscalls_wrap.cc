@@ -712,10 +712,9 @@ int accept4(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__restrict 
 	return fd2;
 }
 
-int accept_bypass(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__restrict len, int *fd2)
+int accept_bypass(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__restrict len, int fd2)
 {
-	*fd2 = -1;
-	fprintf_pos(stderr, "BUMP fd=%d fd2=%d\n", fd, *fd2);
+	fprintf_pos(stderr, "BUMP fd=%d fd2=%d\n", fd, fd2);
 	sock_info *soinf = sol_find(fd);
 	if (soinf == nullptr) {
 		fprintf_pos(stderr, "ERROR fd=%d not found\n", fd);
@@ -726,17 +725,18 @@ int accept_bypass(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__res
 	}
 
 
-	*fd2 = socket_func(PF_INET, SOCK_STREAM, IPPROTO_TCP); // get a VALID fd - for sbwait()
-	sock_info *soinf2 = sol_find(*fd2);
-	fprintf_pos(stderr, "to-be-accepted fd=%d fd2=%d, soinf2=%p\n", fd, *fd2, soinf2);
-	    //fprintf(stderr, "to-be-accepted AAA fd=%d fd2=%d, soinf2=%p %s\n", fd, *fd2, soinf2, soinf2->c_str());
+	//*fd2 = socket_func(PF_INET, SOCK_STREAM, IPPROTO_TCP); // get a VALID fd - for sbwait()
+	sock_info *soinf2 = sol_find(fd2);
+	fprintf_pos(stderr, "to-be-accepted fd=%d fd2=%d, soinf2=%p\n", fd, fd2, soinf2);
+	assert(soinf2 != nullptr);
+	    //fprintf(stderr, "to-be-accepted AAA fd=%d fd2=%d, soinf2=%p %s\n", fd, fd2, soinf2, soinf2->c_str());
 	// ukradi stanje od soinf
 	soinf2->my_id = soinf->my_id;
 	soinf2->my_addr = my_ip_addr; //soinf->my_addr; // soinf->my_addr == 0.0.0.0, tipicno. Medtem ko client ve, kam klice.
 	soinf2->my_port = soinf->my_port;
 	soinf2->bypass(0, 0xFFFFFFFF, 0, -1); // Kje poslusam jaz, vem. Kdo se bo gor povezal, pa ne vem, zato peer fd = -1, in enako vse ostalo od peer-a.
 	//
-	    //fprintf(stderr, "to-be-accepted BBB fd=%d fd2=%d, soinf2=%p %s\n", fd, *fd2, soinf2, soinf2->c_str());
+	    //fprintf(stderr, "to-be-accepted BBB fd=%d fd2=%d, soinf2=%p %s\n", fd, fd2, soinf2, soinf2->c_str());
 	assert(soinf2->peer_fd == -1); // kar preverja prejemnik/client
 	//usleep(10000);
 	soinf->accept_soinf = soinf2;
@@ -789,23 +789,22 @@ int accept(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__restrict l
 	sock_d("accept(fd=%d, ...)", fd);
 	fprintf_pos(stderr, "BUMP fd=%d\n", fd);
 
-#if IPBYPASS_ENABLED
-	error = accept_bypass(fd, addr, len, &fd2);
-	if(error) {
-		errno = error;
-		return -1;
-	}
-	if (fd2 != -1) {
-		return fd2;
-	}
-#endif
-
 	error = linux_accept(fd, addr, len, &fd2);
 	if (error) {
 		sock_d("accept() failed, errno=%d", error);
 		errno = error;
 		return -1;
 	}
+	fprintf_pos(stderr, "BUMP fd=%d, fd2=%d\n", fd, fd2);
+
+#if IPBYPASS_ENABLED
+	sol_insert(fd2, 0);
+	error = accept_bypass(fd, addr, len, fd2);
+	if(error) {
+		errno = error;
+		return -1;
+	}
+#endif
 
 	return fd2;
 }
