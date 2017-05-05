@@ -1410,6 +1410,7 @@ Recimo, da bi zdaj:
 void* bypass_scanner(void *args) {
 	bool modified;
 	int len2;
+	size_t readable_len = 0;
 	fprintf(stderr, "bypass_scanner START, args=%p\n", args);
 
 	while (1) {
@@ -1427,11 +1428,13 @@ void* bypass_scanner(void *args) {
 			if(soinf->my_id != my_owner_id)
 				continue;
 			modified = soinf->modified.load(std::memory_order_relaxed);
-			if (modified) {
-		        soinf->modified.store(false, std::memory_order_release);
-		        len2 = 1; //32k
+			readable_len = soinf->ring_buf.available_read();
+			if (modified || readable_len > 0) {
+				soinf->modified.store(false, std::memory_order_release);
+				len2 = 1; //32k
 				fprintf_pos(stderr, "fd=%d soinf=%p is modified, WAKE UP\n", soinf->fd, soinf);
-		        wake_foreigen_socket(soinf->fd, len2);
+				//sleep(2); // kaj ce server zbudim, se preden pripravi poll/libevent handler?
+				wake_foreigen_socket(soinf->fd, len2);
 			}
 		}
 		if (len2 == 0) {
@@ -1530,7 +1533,8 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	//sleep(1);
 
 	//wake_foreigen_socket(soinf_peer->fd, len2);
-	soinf_peer->modified.store(true, std::memory_order_release);
+	//soinf_peer->modified.store(true, std::memory_order_release);
+	//fprintf_pos(stderr, "fd=%d marking peer_fd=%d as modified\n", fd, soinf_peer->fd);
 SENDTO_BYPASS_USLEEP(1000*500);
 	return len2;
 
