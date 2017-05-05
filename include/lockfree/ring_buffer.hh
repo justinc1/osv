@@ -166,12 +166,15 @@ public:
 
         unsigned len2=0, len2_p1=0, len2_p2=0;
 
+#if 1
         // allow partial read
-        //len2 = std::min(len, sz);
+        len2 = std::min(len, sz);
+#else
         // forbid partial read
         if (len > sz)
             return 0;
         len2 = len;
+#endif
 
         //element = _ring[beg & MaxSizeMask];
         //TODO - split into two memcpy calls
