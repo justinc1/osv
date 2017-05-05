@@ -169,6 +169,7 @@ public:
 	// accept_soinf->fd is fd returned by accept. the descriptor fd is allocated by accepting peer,
 	// peer_* values are set by connecting peer.
 	sock_info *accept_soinf;
+	sock_info *connecting_soinf;
 };
 
 sock_info::sock_info() {
@@ -190,6 +191,7 @@ void sock_info::call_ctor() {
 	peer_port = 0;
 	peer_fd = -1;
 	accept_soinf = nullptr;
+	connecting_soinf = nullptr;
 }
 
 std::string sock_info::str() {
@@ -486,9 +488,16 @@ bool soi_is_readable(int fd) {
 	// nekdo izvaja connect, in je nastavil  soinf->accept_soinf->peer_fd
 	if (soinf->accept_soinf && soinf->accept_soinf->peer_fd > -1)
 		return true;
+
 	// pa tisti, ki klice accept, obvisi, in bi ga kao treba zbuditi.
 	// naj be socket v accept kar vedno readable, pa je..
-	if (soinf->accept_soinf)
+	// to je bilo za netperf ali iperf ali openmpi
+	// dam stran za redis
+	//if (soinf->accept_soinf)
+	//	return true;
+
+	// someone is trying to connect to us
+	if (soinf->connecting_soinf)
 		return true;
 
 	return false;
@@ -759,6 +768,7 @@ int accept_bypass(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__res
 		//(*(volatile int*)(void*)&(soinf->accept_soinf->peer_fd)) < 0);
 	// nehaj sprejemati nove povezave
 	soinf->accept_soinf = nullptr;
+	soinf->connecting_soinf = nullptr;
 
 	// v addr se vpise peer addr:port
 	if (addr &&
@@ -1068,6 +1078,7 @@ do_linux_connect:
 		// TODO TCP daj nastiv se za peer_fd, da bo accept_bypass sel naprej
 		// setup also peer, so that tcp accept_bypass continues
 		int loop_flag = 0;
+		soinf_peer->connecting_soinf = soinf;
 		while(soinf_peer->accept_soinf == nullptr) {
 			if(loop_flag == 0)
 				fprintf_pos(stderr, "INFO waiting on soinf_peer->accept_soinf to be valid...\n", "");
@@ -1092,6 +1103,18 @@ do_linux_connect:
 		soinf->peer_fd = soinf2->fd;
 		// cisto nazadnje
 		soinf2->peer_fd = fd; // == soinf_peer->accept_soinf->peer_fd , flag za cakanje
+
+#if 1
+		// after some delay, this should be true
+		int ii;
+		for (ii=0; ii<1000* 10; ii++) {
+			if (soinf_peer->connecting_soinf != soinf)
+				break;
+			usleep(1000*1);
+		}
+		fprintf_pos(stderr, "INFO waiting on soinf_peer->connecting_soinf to be NULL, ii=%d, connecting_soinf=%p...\n", ii, soinf_peer->connecting_soinf);
+		assert(soinf_peer->connecting_soinf != soinf); // most often, should be == NULL
+#endif
 
 		fprintf_pos(stderr, "INFO connect soinf updated fd=%d %s\n", fd, soinf->c_str());
 		fprintf_pos(stderr, "INFO connect soinf_peer    fd=%d %s\n", fd, soinf_peer->c_str());

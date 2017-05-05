@@ -3190,7 +3190,7 @@ sopoll_generic(struct socket *so, int events, struct ucred *active_cred,
 //size_t soi_data_len(int fd);
 bool soi_is_readable(int fd);
 bool soi_is_writable(int fd);
-//bool fd_is_bypassed(int fd);
+bool fd_is_bypassed(int fd);
 
 int
 sopoll_generic_locked(struct socket *so, int events)
@@ -3201,10 +3201,17 @@ sopoll_generic_locked(struct socket *so, int events)
 	int fd = fd_from_file(fp);
 
 	if (events & (POLLIN | POLLRDNORM))
-		if (soreadabledata(so)) /* KAJ pa ce tega nastavim ?? */
-			revents |= events & (POLLIN | POLLRDNORM);
-		if (soi_is_readable(fd))
-			revents |= events & (POLLIN | POLLRDNORM);
+		if (fd_is_bypassed(fd)) {
+			// a bo to delalo tudi za listen/accept fd?
+			if (soi_is_readable(fd))
+				revents |= events & (POLLIN | POLLRDNORM);
+		}
+		else {
+			if (soreadabledata(so)) /* KAJ pa ce tega nastavim ?? */ {
+				revents |= events & (POLLIN | POLLRDNORM);
+				//fprintf_pos(stderr, "INFO: fd=%d is soreadabledata\n", fd);
+			}
+		}
 
 	if (events & (POLLOUT | POLLWRNORM))
 		if (sowriteable(so))
