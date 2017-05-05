@@ -1095,9 +1095,15 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	fprintf(stderr, "INFO linux_connect fd=%d to in_addr 0x%08x:%d\n",
 		fd, ntohl(in_addr->sin_addr.s_addr), ntohs(in_addr->sin_port));
 
+	// To naredi pred linux_connect, da poll koda deluje
+	// TODO: Mixing of normal and byapssed clients will still be a problem, I guess.
+	if(soinf_peer) {
+		soinf_peer->connecting_soinf = soinf;
+	}
 do_linux_connect:
 #endif
 
+	// ta bo naredil server listen()-ing fd soreadable() - glej uppc_socket.cc, sopoll_generic_locked()
 	error = linux_connect(fd, (void *)addr, len);
 	if (error) {
 		sock_d("connect() failed, errno=%d", error);
@@ -1148,7 +1154,14 @@ do_linux_connect:
 		// TODO TCP daj nastiv se za peer_fd, da bo accept_bypass sel naprej
 		// setup also peer, so that tcp accept_bypass continues
 		int loop_flag = 0;
-		soinf_peer->connecting_soinf = soinf;
+		//
+		// Recimo, da ze linux_connect() sprozi check, ce je socket readable.
+		// In ker nocem preverjati via soreadabledata (v sopoll_generic_locked(), ce je fd byapssed),
+		// potem ne vidim, da je readable. Kasneje se pa vec ne izvede preverjanje.
+		// Preverjam samo via soi_is_readable(), ki pogleda tudi connecting_soinf.
+		// Zato bom tega nastavil ze pred linux_connect().
+		//soinf_peer->connecting_soinf = soinf;
+		//
 		while(soinf_peer->accept_soinf == nullptr) {
 			if(loop_flag == 0)
 				fprintf_pos(stderr, "INFO waiting on soinf_peer->accept_soinf to be valid...\n", "");

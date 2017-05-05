@@ -3207,6 +3207,13 @@ sopoll_generic_locked(struct socket *so, int events)
 				revents |= events & (POLLIN | POLLRDNORM);
 		}
 		else {
+			// Hm, tole moram imeti, da redis-nc.so deluje.
+			// Enako tudi za redis-benchmark.
+			// A je v zvezi z blocking/nonblocking socket nacinom?
+			// TODO preveri
+			// V bistvu se mi na accept zatakne, ta ne gre naprej brez tega. Ker server poll ne more videti, da je accept ready.
+			// Pa ce v tam (v connect) nastavim modified flag? Oz tisto, kar soi_is_readable preverja?
+			// Popravljeno, connect() nastavi connecting_soinf preden klice linux_connect(), in to je to.
 			if (soreadabledata(so)) /* KAJ pa ce tega nastavim ?? */ {
 				revents |= events & (POLLIN | POLLRDNORM);
 				//fprintf_pos(stderr, "INFO: fd=%d is soreadabledata\n", fd);
