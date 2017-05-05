@@ -1045,10 +1045,19 @@ do_linux_connect:
 #if IPBYPASS_ENABLED == 0
 		return -1;
 #endif
-		// no, pa dajmo probati to na tiho ignorirati :/
-		// sej je samo mali iperf server problem....
-		fprintf(stderr, "ERROR connect() failed, errno=%d NA TIHEM IGNORIRAM< da bo vsaj iperf server nekaj lahko vrnil. Tudi ce potem crashne...\n", error);
-		return 0;
+
+		if(error == EINPROGRESS) {
+			// http://stackoverflow.com/questions/8277970/what-are-possible-reason-for-socket-error-einprogress-in-solaris
+			// nonblocking socket, our port:ip is already known. Try to continue.
+			fprintf(stderr, "ERROR connect() failed, errno=%d EINPROGRESS, try to continue\n", error);
+			//sleep(3);
+	}
+		else {
+			// no, pa dajmo probati to na tiho ignorirati :/
+			// sej je samo mali iperf server problem....
+			fprintf(stderr, "ERROR connect() failed, errno=%d NA TIHEM IGNORIRAM< da bo vsaj iperf server nekaj lahko vrnil. Tudi ce potem crashne...\n", error);
+			return 0;
+		}
 	}
 
 #if IPBYPASS_ENABLED
