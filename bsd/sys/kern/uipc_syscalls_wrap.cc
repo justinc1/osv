@@ -1055,7 +1055,13 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 			// oz kdor ima mene za peer-a, tistega bom jaz imel za peer-a.
 			soinf_peer = sol_find_peer2(fd, soinf->my_addr, soinf->my_port);
 		}
-		assert(soinf_peer != nullptr); // ali pa implementiraj se varianto "najprej client, potem server"
+
+		//assert(soinf_peer != nullptr); // ali pa implementiraj se varianto "najprej client, potem server"
+		// Client pomotoma pozenme prej kot server, in naj bo potem lep error/exit.
+		if (soinf_peer == nullptr) {
+			errno = ECONNREFUSED;
+			return -1;
+		}
 
 		peer_fd = soinf_peer->fd;
 		fprintf_pos(stderr, "INFO connect fd=%d me %s to peer %d:%d_0x%08x:%d try to bypass\n",
