@@ -1542,6 +1542,9 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	if(!soinf) {
 		return 0;
 	}
+	if (!soinf->is_bypass) {
+		return 0;
+	}
 
 	uint32_t peer_id = 0;
 	uint32_t peer_addr = 0xFFFFFFFF;
