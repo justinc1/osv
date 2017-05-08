@@ -1516,6 +1516,12 @@ void* bypass_scanner(void *args) {
 				//sleep(2); // kaj ce server zbudim, se preden pripravi poll/libevent handler?
 				wake_foreigen_socket(soinf->fd, len2);
 			}
+			if (/*!modified && */ soinf->flags & SOR_CLOSED) {
+				// a so sedaj vsi zbujeni ze koncali z delom? Nisem ziher...
+				// !modified check bi samo zakasnil za en cikel.
+				fprintf_pos(stderr, "fd=%d soinf=%p is SOR_CLOSED, REMOVE\n", soinf->fd, soinf);
+			    sol_remove(soinf->fd, -1); // ampak, ce je socket shutdown, se se vedno lahko bere iz njega.
+			}
 		}
 		if (len2 == 0) {
 			// no socket was modified, sleep a bit
@@ -1924,8 +1930,13 @@ nastavi CANTRECVMORE flag, da ne bo netperf.so caka na branje is socketa, ki ga 
 		soinf_peer->flags |= SOR_CLOSED;
 		fprintf_pos(stderr, "fd=%d soinf_peer=%p flags=%p 0x%04x\n", fd, soinf_peer, &soinf_peer->flags, (int)soinf_peer->flags);
 		// Now notify peer
+		fprintf_pos(stderr, "fd=%d marking peer_fd=%d as modified\n", fd, soinf_peer->fd);
 		soinf_peer->modified.store(true, std::memory_order_release);
 	}
+
+	// pobrisem svoj soinf
+	sol_remove(fd, -1); // ampak, ce je socket shutdown, se se vedno lahko bere iz njega.
+	// soinf_peer naj pobrise lastnik, v threadu za skeniranje modified flag.
 #endif
 	return 0;
 }
