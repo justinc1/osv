@@ -133,6 +133,8 @@ public:
 	void bypass(uint32_t peer_id, uint32_t peer_addr, ushort peer_port, int peer_fd);
 	size_t data_push(const void* buf, size_t len);
 	size_t data_pop(void* buf, size_t len /*, short *so_rcv_state=nullptr*/);
+	void unsafe_remove();
+	static int unsafe_remove_all_my();
 public:
     void call_ctor();
     void call_dtor();
@@ -192,6 +194,14 @@ void sock_info::call_ctor() {
 	peer_fd = -1;
 	accept_soinf = nullptr;
 	connecting_soinf = nullptr;
+}
+
+void sock_info::unsafe_remove() {
+	// Just reset all memory to 0x00
+	// After VM reboot, the ivshmem based memory should appear clean.
+	// c_str is safe to call - it uses only this->xx data, not this->xx->yy.
+	fprintf_pos(stderr, "UNSAFE DELETE-ing vm_id=%d, soinf=%p %s\n", my_owner_id, this, c_str());
+	memset(this, 0x00, sizeof(*this));
 }
 
 std::string sock_info::str() {
@@ -346,6 +356,22 @@ void sol_remove(int fd, int protocol) {
 			//it++;
 		}
 	}
+}
+
+int sock_info::unsafe_remove_all_my() {
+	fprintf_pos(stderr, "UNSAFE DELETE-ing all sock_info, vm_id=%d START\n", my_owner_id);
+	int ii;
+	int ret = 0;
+	for (ii = 0; so_list && ii < SOCK_INFO_LIST_LEN; ii++) {
+		sock_info *soinf = (*so_list)[ii];
+		if (soinf && soinf->my_id == my_owner_id) {
+			soinf->unsafe_remove();
+			ret++;
+		}
+		(*so_list)[ii] = nullptr;
+	}
+	fprintf_pos(stderr, "UNSAFE DELETE-ing all sock_info, vm_id=%d DONE\n", my_owner_id);
+	return ret;
 }
 
 sock_info* sol_find(int fd) {
@@ -2006,7 +2032,9 @@ void ipbypass_setup() {
 	    so_list = (sock_info* (*)[SOCK_INFO_LIST_LEN]) ivshmem_at(shmid);
 	}*/
 	so_list = (sock_info* (*)[SOCK_INFO_LIST_LEN]) get_layout_ivm___so_list();
+
 	// NE, to sme samo "prva" VM. memset((void*)so_list, 0x00, sizeof(*so_list));
+	sock_info::unsafe_remove_all_my();
 
 	socket_func = socket;
 	// za debug, naj ima 2nd VM druge fd-je
