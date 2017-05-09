@@ -695,6 +695,15 @@ int getsockname(int sockfd, struct bsd_sockaddr *addr, socklen_t *addrlen)
 			errno = EINVAL;
 			return -1;
 		}
+		/*
+		ker sem videl cisto garbage sa_family v
+		btl_tcp_proc.c, mca_btl_tcp_proc_accept()
+		"if( btl_endpoint->endpoint_addr->addr_family != addr->sa_family ) {"
+
+		bsd_sockaddr vsebuje char sa_len, char sa_family, sa_data
+		linux addr je pa brez tistega len na zacetku, in namesto char sa_family je short sin_family
+		*/
+		in_addr->sin_family = AF_INET;
 		in_addr->sin_addr.s_addr = soinf->my_addr;
 		in_addr->sin_port = soinf->my_port;
 
@@ -774,6 +783,15 @@ int getpeername(int sockfd, struct bsd_sockaddr *addr, socklen_t *addrlen)
 			errno = EINVAL;
 			return -1;
 		}
+		/*
+		ker sem videl cisto garbage sa_family v
+		btl_tcp_proc.c, mca_btl_tcp_proc_accept()
+		"if( btl_endpoint->endpoint_addr->addr_family != addr->sa_family ) {"
+
+		bsd_sockaddr vsebuje char sa_len, char sa_family, sa_data
+		linux addr je pa brez tistega len na zacetku, in namesto char sa_family je short sin_family
+		*/
+		in_addr->sin_family = AF_INET;
 		in_addr->sin_addr.s_addr = soinf_peer->my_addr;
 		in_addr->sin_port = soinf_peer->my_port;
 
