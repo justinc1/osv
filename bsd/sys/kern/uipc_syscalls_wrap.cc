@@ -1728,8 +1728,8 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	len2 = soinf_peer->data_push(buf, len);
 	//sleep(1);
 
-	//wake_foreigen_socket(soinf_peer->fd, len2);
-	//soinf_peer->modified.store(true, std::memory_order_release);
+	wake_foreigen_socket(soinf_peer->fd, len2);
+	soinf_peer->modified.store(true, std::memory_order_release);
 	//fprintf_pos(stderr, "fd=%d marking peer_fd=%d as modified\n", fd, soinf_peer->fd);
 SENDTO_BYPASS_USLEEP(1000*500);
 	return len2;
