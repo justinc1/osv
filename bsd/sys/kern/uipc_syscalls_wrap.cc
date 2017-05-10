@@ -871,9 +871,10 @@ int accept_bypass(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__res
 		soinf->peer_port == 0 &&*/
 		soinf->accept_soinf->peer_fd < 0);
 		//(*(volatile int*)(void*)&(soinf->accept_soinf->peer_fd)) < 0);
+
 	// nehaj sprejemati nove povezave
 	soinf->accept_soinf = nullptr;
-	soinf->connecting_soinf = nullptr;
+	// TODO - atomic, pa kdor je nastavil, naj se pobrise. soinf->connecting_soinf = nullptr;
 
 	// v addr se vpise peer addr:port
 	if (addr &&
@@ -1148,8 +1149,23 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	// To naredi pred linux_connect, da poll koda deluje
 	// TODO: Mixing of normal and byapssed clients will still be a problem, I guess.
 	if(soinf_peer) {
-		soinf_peer->connecting_soinf = soinf;
+		//soinf_peer->connecting_soinf = soinf;
+
+		static_assert(sizeof(std::atomic<sock_info*>) == sizeof(sock_info*), "Vsaj velikostyi bi morale biti enake, da je cast morda OK.");
+		std::atomic<sock_info*>* a_conn_soinf = (std::atomic<sock_info*>*)(void*)&soinf_peer->connecting_soinf;
+		sock_info *expected = nullptr;
+		fprintf_pos(stderr, "INFO fd=%d set ATOMIC connecting_soinf before: obj=%p expected=%p, soinf=%p \n", fd, a_conn_soinf->load(), expected, soinf);
+		int cnt = 0;
+		bool exchange_done = false;
+		do {
+			expected = nullptr;
+			exchange_done = a_conn_soinf->compare_exchange_weak(expected, soinf);
+			cnt++;
+		} while (!exchange_done);
+		fprintf_pos(stderr, "INFO fd=%d set ATOMIC connecting_soinf after : obj=%p expected=%p, soinf=%p cnt=%d\n", fd, a_conn_soinf->load(), expected, soinf, cnt);
+		assert(soinf_peer->connecting_soinf == soinf);
 	}
+
 do_linux_connect:
 #endif
 
@@ -1236,6 +1252,19 @@ do_linux_connect:
 		soinf->peer_fd = soinf2->fd;
 		// cisto nazadnje
 		soinf2->peer_fd = fd; // == soinf_peer->accept_soinf->peer_fd , flag za cakanje
+
+		std::atomic<sock_info*>* a_conn_soinf = (std::atomic<sock_info*>*)(void*)&soinf_peer->connecting_soinf;
+		sock_info *expected = soinf;
+		fprintf_pos(stderr, "INFO fd=%d set ATOMIC connecting_soinf before reset: obj=%p expected=%p, soinf=%p \n", fd, a_conn_soinf->load(), expected, soinf);
+		int cnt = 0;
+		bool exchange_done = false;
+		do {
+			expected = soinf;
+			exchange_done = a_conn_soinf->compare_exchange_weak(expected, nullptr);
+			cnt++;
+		} while (!exchange_done);
+		fprintf_pos(stderr, "INFO fd=%d set ATOMIC connecting_soinf after reset : obj=%p expected=%p, soinf=%p cnt=%d\n", fd, a_conn_soinf->load(), expected, soinf, cnt);
+		assert(expected == soinf);
 
 #if 1
 		// after some delay, this should be true
