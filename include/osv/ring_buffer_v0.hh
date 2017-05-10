@@ -13,6 +13,7 @@
 
 // sock_info.flags
 #define SOR_CLOSED          0x0001
+#define SOR_DELETED         0x0002
 #define SOR_NONBLOCK        0x0100
 
 class RingMessageHdr {

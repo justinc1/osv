@@ -325,8 +325,27 @@ void sol_insert(int fd, int protocol) {
 	}
 }
 
+// Ta naj samo oznaci soinf kot deleted.
+// Ker tudi ce je socket zaprt, se vedno lahko fd uporabi v read/write().
 void sol_remove(int fd, int protocol) {
-	fprintf_pos(stderr, "DELETE-ing fd=%d\n", fd);
+	fprintf_pos(stderr, "DELETE-MARK-ing fd=%d\n", fd);
+	int ii;
+	for (ii = 0; so_list && ii < SOCK_INFO_LIST_LEN; ii++) {
+		sock_info *soinf = (*so_list)[ii];
+		if (soinf && soinf->my_id == my_owner_id && soinf->fd == fd) {
+			(*so_list)[ii] = nullptr;
+			fprintf_pos(stderr, "DELETE-MARK-ed fd=%d soinf=%p at ii=%d\n", fd, soinf, ii);
+			//soinf->free_ivshmem();
+			soinf->flags |= SOR_DELETED; // fd je neveljaven, in bo morda reused.
+		}
+	}
+}
+
+/*
+Tega lahko klicem iz mesta, kjer se free fd allocira.
+*/
+void sol_remove_real(int fd, int protocol) {
+	fprintf_pos(stderr, "DELETE-REAL-ing fd=%d\n", fd);
 	//return;
 	//sleep(10);
 	// TODO a bi moral tudi peer-a removati?
@@ -348,7 +367,7 @@ void sol_remove(int fd, int protocol) {
 			(*so_list)[ii] = nullptr;
 			
 
-			fprintf_pos(stderr, "DELETE-ed fd=%d soinf=%p at ii=%d\n", fd, soinf, ii);
+			fprintf_pos(stderr, "DELETE-REAL-ed fd=%d soinf=%p at ii=%d\n", fd, soinf, ii);
 			memset(soinf, 0x00, sizeof(*soinf));
 			soinf->free_ivshmem();
 		}
@@ -1340,6 +1359,13 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 	assert(soinf && soinf->is_bypass);
 	fprintf_pos(stderr, "fd=%d len=%d BYPASS-ed\n", fd, len);
 
+	// ta fd je ze bil pobrisan, in je neveljaven
+	if (soinf->flags & SOR_DELETED) {
+		errno = EBADF;
+		return -1;
+	}
+	// shutdown ali close je ze bil klican, SOR_CLOSED je nastavljen - read se lahko vrne se-neprebrane podatke
+
 	// ce sem od prejsnjega branja dobil dva pakate, potem sem dvakrat nastavil flag/event za sbwait.
 	// ampak sbwait() bo sedaj samo enkrat pocistil, 
 	// tako da, ce podatki so, potem jih beri brez sbwait() cakanja.
@@ -1617,6 +1643,14 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	}
 	if (!soinf->is_bypass) {
 		return 0;
+	}
+	if (soinf->flags & SOR_DELETED) {
+		errno = EBADF;
+		return -1;
+	}
+	if (soinf->flags & SOR_CLOSED) {
+		errno = ESHUTDOWN;
+		return -1;
 	}
 
 	uint32_t peer_id = 0;
@@ -2010,8 +2044,8 @@ nastavi CANTRECVMORE flag, da ne bo netperf.so caka na branje is socketa, ki ga 
 		soinf_peer->modified.store(true, std::memory_order_release);
 	}
 
-	// pobrisem svoj soinf
-	sol_remove(fd, -1); // ampak, ce je socket shutdown, se se vedno lahko bere iz njega.
+	// pobrisem svoj soinf - oz to sele kasneje, ker branje is shutdown-ed socket je veljavno.
+	//sol_remove(fd, -1); // ampak, ce je socket shutdown, se se vedno lahko bere iz njega.
 	// soinf_peer naj pobrise lastnik, v threadu za skeniranje modified flag.
 #endif
 	return 0;
@@ -2032,6 +2066,7 @@ int socket(int domain, int type, int protocol) /**/
 	}
 
 #if IPBYPASS_ENABLED
+	sol_remove_real(s, protocol); // late remove.
 	sol_insert(s, protocol);
 #endif
 	return s;

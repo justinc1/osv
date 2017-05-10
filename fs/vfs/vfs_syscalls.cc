@@ -274,6 +274,17 @@ sys_read(struct file *fp, const struct iovec *iov, size_t niov,
 
     int fd = fd_from_file(fp);
     if (fd_is_bypassed(fd)) {
+		/*
+		TODO:
+		if (soinf->flags & SOR_DELETED) {
+			errno = EBADF;
+			return -1;
+		}
+		if (soinf->flags & SOR_CLOSED) {
+			errno = ESHUTDOWN;
+			return -1;
+		}
+		*/
         *count = 0;
         int ret = 0;
         size_t bytes = 0;
@@ -347,6 +358,17 @@ sys_write(struct file *fp, const struct iovec *iov, size_t niov,
 
     int fd = fd_from_file(fp);
     if (fd_is_bypassed(fd)) {
+		/*
+		TODO:
+		if (soinf->flags & SOR_DELETED) {
+			errno = EBADF;
+			return -1;
+		}
+		if (soinf->flags & SOR_CLOSED) {
+			errno = ESHUTDOWN;
+			return -1;
+		}
+		*/
         *count = 0;
         int ret = 0;
         size_t bytes = 0;
