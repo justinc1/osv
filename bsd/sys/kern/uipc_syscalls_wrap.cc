@@ -1589,7 +1589,7 @@ Recimo, da bi zdaj:
 void* bypass_scanner(void *args) {
 	bool modified;
 	int len2;
-	size_t readable_len = 0;
+	//size_t readable_len = 0;
 	fprintf(stderr, "bypass_scanner START, args=%p\n", args);
 
 	while (1) {
@@ -1607,8 +1607,10 @@ void* bypass_scanner(void *args) {
 			if(soinf->my_id != my_owner_id)
 				continue;
 			modified = soinf->modified.load(std::memory_order_relaxed);
-			if (modified ||
-				0 < (readable_len = soinf->ring_buf.available_read())) {
+			if (
+				modified
+				//|| 0 < (readable_len = soinf->ring_buf.available_read())
+				) {
 				soinf->modified.store(false, std::memory_order_release);
 				len2 = 1; //32k
 				fprintf_pos(stderr, "fd=%d soinf=%p is modified, WAKE UP\n", soinf->fd, soinf);
