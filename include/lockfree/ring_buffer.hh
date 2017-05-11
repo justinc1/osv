@@ -234,6 +234,15 @@ public:
         return beg == end;
     }
 
+    // Mogoce vcasih rece, da je prazno, tudi ce so podatki notri - to laze samo consumerju.
+    // Se pravi, da zaradi tega morda bolj pocasi berem, kot pa bi lahko. Kaj ce bi raje prehitro bral?
+    // No, ravn prav hitro je pa itak empty() zgoraj.
+    bool empty2() const {
+        unsigned beg = _begin.load(std::memory_order_relaxed);
+        unsigned end = _end.load(std::memory_order_relaxed);
+        return beg == end;
+    }
+
     // DEBUG_ASSERT(!empty(), "calling front() on an empty queue!");
 
     /**

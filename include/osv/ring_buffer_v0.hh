@@ -137,6 +137,12 @@ public:
 	size_t available_write() {
 		return BYPASS_BUF_SZ - size();
 	};
+	bool empty() {
+		return ring_buffer_spsc::empty();
+	}
+	bool empty2() {
+		return ring_buffer_spsc::empty2();
+	}
 public:
 	size_t wpos_cum, rpos_cum;
 	std::atomic<size_t> wpos_cum2, rpos_cum2;
