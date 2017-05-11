@@ -172,6 +172,7 @@ public:
 	// peer_* values are set by connecting peer.
 	sock_info *accept_soinf;
 	sock_info *connecting_soinf;
+	uint64_t scan_mod, scan_old;
 };
 
 sock_info::sock_info() {
@@ -194,6 +195,8 @@ void sock_info::call_ctor() {
 	peer_fd = -1;
 	accept_soinf = nullptr;
 	connecting_soinf = nullptr;
+
+	scan_mod = scan_old = 0;
 }
 
 void sock_info::unsafe_remove() {
@@ -341,6 +344,8 @@ void sol_remove(int fd, int protocol) {
 	}
 }
 
+int sol_print(int fd);
+
 /*
 Tega lahko klicem iz mesta, kjer se free fd allocira.
 */
@@ -367,6 +372,7 @@ void sol_remove_real(int fd, int protocol) {
 			(*so_list)[ii] = nullptr;
 			
 
+			sol_print(fd);
 			fprintf_pos(stderr, "DELETE-REAL-ed fd=%d soinf=%p at ii=%d\n", fd, soinf, ii);
 			memset(soinf, 0x00, sizeof(*soinf));
 			soinf->free_ivshmem();
@@ -1611,11 +1617,17 @@ void* bypass_scanner(void *args) {
 				modified
 				//|| 0 < (readable_len = soinf->ring_buf.available_read())
 				) {
+				soinf->scan_mod++;
+				assert(soinf->scan_mod > 0); // chech wrap around
 				soinf->modified.store(false, std::memory_order_release);
 				len2 = 1; //32k
 				fprintf_pos(stderr, "fd=%d soinf=%p is modified, WAKE UP\n", soinf->fd, soinf);
 				//sleep(2); // kaj ce server zbudim, se preden pripravi poll/libevent handler?
 				wake_foreigen_socket(soinf->fd, len2);
+			}
+			else {
+				soinf->scan_old++;
+				assert(soinf->scan_old > 0); // chech wrap around
 			}
 			if (/*!modified && */ soinf->flags & SOR_CLOSED) {
 				// a so sedaj vsi zbujeni ze koncali z delom? Nisem ziher...
@@ -1960,14 +1972,19 @@ int sol_print(int fd)
 
 	size_t wpos_cum=0, rpos_cum=0;
 	size_t wpos_cum2=0, rpos_cum2=0;
+	uint64_t scan_mod=0, scan_old=0;
 	wpos_cum = soinf->ring_buf.wpos_cum;
 	rpos_cum = soinf->ring_buf.rpos_cum;
 	wpos_cum2 = soinf->ring_buf.wpos_cum2.load();
 	rpos_cum2 = soinf->ring_buf.rpos_cum2.load();
-	fprintf(stderr, "INFO sock_info, fd=%d peer_fd=%d me   rpos_cum=%zu wpos_cum=%zu    DELTA=%zu (atomic %zu %zu    %zu)\n",
+	scan_mod =  soinf->scan_mod;
+	scan_old =  soinf->scan_old;
+	fprintf(stderr, "INFO sock_info, fd=%d peer_fd=%d me   rpos_cum=%zu wpos_cum=%zu    DELTA=%zu (atomic %zu %zu    %zu), scan mod/old=%zu/%zu\n",
 		fd, peer_fd,
 		rpos_cum, wpos_cum, wpos_cum - rpos_cum,
-		rpos_cum2, wpos_cum2, wpos_cum2 - rpos_cum2);
+		rpos_cum2, wpos_cum2, wpos_cum2 - rpos_cum2,
+		scan_mod, scan_old);
+	fflush(stderr);
 	sock_info *soinf_peer = nullptr;
 	/* vsaj za tcp, bi to zdaj ze moral biti povezano*/
 	//int peer_fd = soinf->peer_fd;
@@ -1981,10 +1998,14 @@ int sol_print(int fd)
 	rpos_cum = soinf_peer->ring_buf.rpos_cum;
 	wpos_cum2 = soinf_peer->ring_buf.wpos_cum2.load();
 	rpos_cum2 = soinf_peer->ring_buf.rpos_cum2.load();
-	fprintf(stderr, "INFO sock_info, fd=%d peer_fd=%d peer rpos_cum=%zu wpos_cum=%zu    DELTA=%zu (atomic %zu %zu    %zu)\n",
+	scan_mod =  soinf_peer->scan_mod;
+	scan_old =  soinf_peer->scan_old;
+	fprintf(stderr, "INFO sock_info, fd=%d peer_fd=%d peer rpos_cum=%zu wpos_cum=%zu    DELTA=%zu (atomic %zu %zu    %zu), scan mod/old=%zu/%zu\n",
 		fd, peer_fd,
 		rpos_cum, wpos_cum, wpos_cum - rpos_cum,
-		rpos_cum2, wpos_cum2, wpos_cum2 - rpos_cum2);
+		rpos_cum2, wpos_cum2, wpos_cum2 - rpos_cum2,
+		scan_mod, scan_old);
+	fflush(stderr);
 	return 0;
 }
 
