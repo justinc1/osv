@@ -1606,7 +1606,7 @@ void* bypass_scanner(void *args) {
 				continue;
 			if(soinf->my_id != my_owner_id)
 				continue;
-			modified = soinf->modified.load(std::memory_order_relaxed);
+			modified = soinf->modified.load(std::memory_order_acquire);
 			if (
 				modified
 				//|| 0 < (readable_len = soinf->ring_buf.available_read())
