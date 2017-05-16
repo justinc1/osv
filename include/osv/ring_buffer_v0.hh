@@ -110,6 +110,9 @@ public:
 public:
 	size_t push(const void* buf, size_t len) {
 		size_t ret;
+		if (len == 0) {
+			return 0;
+		}
 		while (0 == (ret = ring_buffer_spsc::push(buf, len))) {
 		}
 		wpos_cum += ret;

@@ -376,11 +376,14 @@ sys_write(struct file *fp, const struct iovec *iov, size_t niov,
         for (unsigned i = 0; i < niov; i++) {
             bytes += iovp->iov_len;
             ret = sendto_bypass(fd, iovp->iov_base, iovp->iov_len, 0, nullptr, 0);
-            if (ret <= 0) {
+            if (ret < 0) {
                 return errno; // npr EINTR. Ali pa errno. Ali pa nekaj.
             }
             if (ret == 0) {
-                return EINTR; // npr EINTR. Ali pa errno. Ali pa nekaj.
+                if (iovp->iov_len > 0) {
+                    return EINTR; // npr EINTR. Ali pa errno. Ali pa nekaj.
+                }
+                // else ret==0 is OK, 0-length iovec
             }
             *count += ret;
             assert((unsigned int)ret <= iovp->iov_len); // to bi moral biti atomicen write, vsaj za posamezen iov
