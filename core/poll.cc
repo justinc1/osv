@@ -107,7 +107,39 @@ void poll_drain(struct file* fp)
  */
 int poll_scan(std::vector<poll_file>& _pfd)
 {
+#if 1
     dbg_d("poll_scan()");
+#else
+    {
+        int fd = -1;
+        int pos = 0;
+        char msg[1024] = "poll_scan() pfd=[";
+
+        pos = strlen(msg);
+        for (auto& e : _pfd) {
+            auto* entry = &e;
+            auto* fp = entry->fp.get();
+            if (!fp) {
+                continue;
+            }
+            fd = fd_from_file(fp);
+            pos += snprintf(msg+pos, sizeof(msg)-pos, "%d ", fd);
+        }
+        pos += snprintf(msg+pos, sizeof(msg)-pos, "]");
+
+        // show message only if it changes, on once in a while
+        thread_local char* tmsg = nullptr;
+        thread_local int cnt=0;
+        if (tmsg == nullptr) {
+            tmsg = (char*)malloc(sizeof(msg));
+        }
+        if (strcmp(msg, tmsg) != 0 || cnt%100000==0) {
+            dbg_d(msg);
+        }
+        cnt++;
+        strncpy(tmsg, msg, sizeof(msg));
+    }
+#endif
 
     int nr_events = 0;
 
