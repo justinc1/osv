@@ -835,8 +835,15 @@ int getpeername(int sockfd, struct bsd_sockaddr *addr, socklen_t *addrlen)
 }
 
 extern "C"
+int accept(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__restrict len);
+
+extern "C"
 int accept4(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__restrict len, int flg)
 {
+#if 1
+	// samo goljufam za nginx in ipbypass
+	return accept(fd, addr, len);
+#else
 	int fd2, error;
 
 	sock_d("accept4(fd=%d, ..., flg=%d)", fd, flg);
@@ -849,6 +856,7 @@ int accept4(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__restrict 
 	}
 
 	return fd2;
+#endif
 }
 
 int accept_bypass(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__restrict len, int fd2)
