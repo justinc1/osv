@@ -52,7 +52,7 @@
 int getsock_cap(int fd, struct file **fpp, u_int *fflagp);
 
 
-#if 1
+#if 0
 #  undef fprintf_pos
 #  define fprintf_pos(...) /**/
 #  define SENDTO_BYPASS_USLEEP(x)
@@ -69,7 +69,7 @@ int getsock_cap(int fd, struct file **fpp, u_int *fflagp);
 //#define RingBuffer RingBufferV0
 #define RingBuffer RingBuffer_atomic
 
-#define IPBYPASS_ENABLED 1
+#define IPBYPASS_ENABLED 0
 #define IPBYPASS_LOCKED 0
 #define MEM_BARRIER 
 	//asm volatile("" ::: "memory")
@@ -1974,7 +1974,7 @@ int sol_print(int fd)
 	if(!soinf) {
 		fprintf(stderr, "INFO sock_info, fd=%d peer_fd=%d soinf==NULL\n",
 			fd, peer_fd);
-		return 0;
+		return 0; /* hb 	*/
 	}
 	peer_fd = soinf->peer_fd;
 
