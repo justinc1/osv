@@ -44,8 +44,21 @@
 #include <osv/vnode.h>
 #include <osv/file.h>
 #include <osv/mount.h>
+#include "osv/debug.hh"
 
 #include "ramfs.h"
+
+/*
+ * Avoid malloc/memcpy/free for each appended to ram FS file.
+ * Instead, grow memory buffer in power of 2 increments, with
+ * hardcoded limit betwen RAMFS_MIN_SIZE_INC and RAMFS_MAX_SIZE_INC.
+ * It helps to postpone ever slowing append to file, but it doesnt really
+ * elimanate it. Problem only gets significat at (hopefully much)
+ * larger file sizes.
+ */
+#define RAMFS_MIN_SIZE_INC (PAGE_SIZE * 16)
+#define RAMFS_MAX_SIZE_INC (PAGE_SIZE * 1024)
+#define RAMFS_MAX_SIZE_MASK (RAMFS_MAX_SIZE_INC - 1)
 
 static mutex_t ramfs_lock = MUTEX_INITIALIZER;
 static uint64_t inode_count = 1; /* inode 0 is reserved to root */
@@ -384,8 +397,30 @@ ramfs_write(struct vnode *vp, struct uio *uio, int ioflag)
 		/* Expand the file size before writing to it */
 		off_t end_pos = uio->uio_offset + uio->uio_resid;
 		if (end_pos > (off_t)np->rn_bufsize) {
+			size_t new_size;
+			if (end_pos <= RAMFS_MIN_SIZE_INC) {
+				new_size = RAMFS_MIN_SIZE_INC;
+			}
+			else if (end_pos >= RAMFS_MAX_SIZE_INC) {
+				new_size = ((end_pos + RAMFS_MAX_SIZE_MASK) & ~RAMFS_MAX_SIZE_MASK);
+			}
+			else {
+				off_t min_new_size = round_page(end_pos);
+				new_size = RAMFS_MIN_SIZE_INC;
+				while ((off_t)new_size < min_new_size) {
+					new_size <<= 1;
+				}
+			}
+#if 1
+			{
+				char temp[1024];
+				// use OSv debug() because fprintf(stderr) caused inf reqursion
+				snprintf(temp, sizeof(temp), "RAMFS resize from %d=0x%08x to %d=0x%08x, end_pos=%d=0x%08x\n",
+					(int)np->rn_bufsize, (int)np->rn_bufsize, (int)new_size, (int)new_size, int(end_pos), int(end_pos));
+				debug(temp);
+			}
+#endif
 			// XXX: this could use a page level allocator
-			size_t new_size = round_page(end_pos);
 			void *new_buf = malloc(new_size);
 			if (!new_buf)
 				return EIO;
