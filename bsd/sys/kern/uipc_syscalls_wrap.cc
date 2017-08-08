@@ -209,7 +209,7 @@ void sock_info::unsafe_remove() {
 
 std::string sock_info::str() {
 	char desc[1024]="";
-	if(this) {
+	if( ((uint64_t)(void*)this) != 0) {
 		snprintf(desc, sizeof(desc), "%d:%d_0x%08x:%d<-->%d:%d_0x%08x:%d",
 			my_id, fd, ntohl(my_addr), ntohs(my_port),
 			peer_id, peer_fd, ntohl(peer_addr), ntohs(peer_port)

@@ -3220,12 +3220,13 @@ sopoll_generic_locked(struct socket *so, int events)
 			}
 		}
 
-	if (events & (POLLOUT | POLLWRNORM))
+	if (events & (POLLOUT | POLLWRNORM)) {
 		if (sowriteable(so))
 			revents |= events & (POLLOUT | POLLWRNORM);
 		if (soi_is_writable(fd)) {
 			revents |= events & (POLLOUT | POLLWRNORM);
 		}
+	}
 
 	if (events & (POLLPRI | POLLRDBAND))
 		if (so->so_oobmark || (so->so_rcv.sb_state & SBS_RCVATMARK))
