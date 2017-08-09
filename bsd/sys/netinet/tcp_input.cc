@@ -92,6 +92,8 @@
 #include <osv/net_trace.hh>
 #include <osv/aligned_new.hh>
 
+#include <osv/ipbypass.h>
+
 TRACEPOINT(trace_tcp_input_ack, "%p: We've got ACK: %u", void*, unsigned int);
 
 const int tcprexmtthresh = 3;
@@ -427,7 +429,18 @@ tcp_fields_to_host(struct tcphdr *th)
 
 
 void
+tcp_input_real(struct mbuf *m, int off0);
+void
 tcp_input(struct mbuf *m, int off0)
+{
+	static int cnt=0;
+	debug("ENTER tcp_input depth_cnt=%d\n", cnt++);
+	tcp_input_real(m, off0);
+	debug("LEAVE tcp_input depth_cnt=%d\n\n", --cnt);
+}
+
+void
+tcp_input_real(struct mbuf *m, int off0)
 {
 	struct tcphdr *th = NULL;
 	struct ip *ip = NULL;
@@ -937,6 +950,9 @@ relocked:
 			tcp_trace(TA_INPUT, ostate, tp,
 			    (void *)tcp_saveipgen, &tcp_savetcp, 0);
 #endif
+		int fd = fd_from_file(so->fp);
+		debug("TCP SYN is valid, syncache_add, so=%p so->fp=%p fd=%d, th->sport=%d th->dport=%d\n",
+			so, so->fp, fd, ntohs(th->th_sport), ntohs(th->th_dport));
 		tcp_dooptions(&to, optp, optlen, TO_SYN);
 		syncache_add(&inc, &to, th, inp, &so, m);
 		/*
@@ -1524,6 +1540,12 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 				tp->t_flags &= ~TF_NEEDFIN;
 				thflags &= ~TH_SYN;
 			} else {
+				int fd = -1;
+				fd = fd_from_file(so->fp);
+				debug("TCP set_state TCPS_ESTABLISHED client-side, so=%p so->fp=%p fd=%d\n", so, so->fp, fd);
+				// th->th_sport - listening port od server strani, th->th_dport - random port, iz katerega se client povezuje
+				connect_from_tcp_etablished_client(fd, 0, th->th_sport);
+				mybreak();
 				tp->set_state(TCPS_ESTABLISHED);
 				tcp_setup_net_channel(tp, m->M_dat.MH.MH_pkthdr.rcvif);
 				cc_conn_init(tp);
@@ -1931,6 +1953,11 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			tp->set_state(TCPS_FIN_WAIT_1);
 			tp->t_flags &= ~TF_NEEDFIN;
 		} else {
+			int fd=-1;
+			fd = fd_from_file(so->fp);
+			debug("TCP set_state TCPS_ESTABLISHED server-side, so=%p so->fp=%p fd=%d\n", so, so->fp, fd);
+			//connect_from_tcp_etablished_server(fd, 0);
+			mybreak();
 			tp->set_state(TCPS_ESTABLISHED);
 			tcp_setup_net_channel(tp, m->M_dat.MH.MH_pkthdr.rcvif);
 			cc_conn_init(tp);

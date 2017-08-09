@@ -57,6 +57,8 @@
 
 #include <mutex>
 
+#include <osv/ipbypass.h>
+
 using namespace std;
 
 extern "C" int linux_ioctl_socket(socket_file *fp, u_long cmd, void *data) ;
@@ -66,6 +68,7 @@ socket_file::socket_file(unsigned flags, socket* _so)
     : file(flags, DTYPE_SOCKET, _so)
     , so(_so)
 {
+    debug("fd=?? so=%p so->fp=%p\n", so, so->fp);
     so->fp = this;
 }
 

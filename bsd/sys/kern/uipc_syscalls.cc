@@ -64,6 +64,7 @@
 #include <sys/eventfd.h>
 
 #include <osv/debug.hh>
+#include <osv/ipbypass.h>
 
 using namespace std;
 
@@ -287,6 +288,7 @@ kern_accept(int s, struct bsd_sockaddr *name,
 #endif
 	try {
 	    auto nf = make_file<socket_file>(fflag, so);
+	    // fd se ni allociran!
 	    nfp = nf.get();  // want nf.release()
 	    fhold(nfp);
 	} catch (int err) {
@@ -313,6 +315,8 @@ kern_accept(int s, struct bsd_sockaddr *name,
 	error = fdalloc(nfp, &fd);
 	if (error)
 		goto noconnection;
+	debug("fd=%d so=%p so->fp=%p\n", fd, so, so->fp);
+	accept_from_tcp_etablished_server(fd, 0, 0/*peer_addr*/, 0/*peer_port*/); // kdo je client - nimam pojma.
 	/* An extra reference on `nfp' has been held for us by fdalloc(). */
 	*out_fd = fd;
 
