@@ -1577,6 +1577,50 @@ class osv_percpu(gdb.Command):
                     return
             gdb.write('%s\n'%target)
 
+
+import socket
+def ntohs(val):
+    return socket.htons(val)
+
+def ntohl(val):
+    return socket.htonl(val)
+
+def ipby_print_so_list_ii(ii, show_null=True):
+#    def invoke(self, args, from_tty):
+    so_list = gdb.lookup_global_symbol('so_list').value()
+    #gdb.write('XX so_list addr = %s\n' % str(so_list))
+    soinf = gdb.parse_and_eval('so_list[0][%s]' % (ii))
+    soinf_addr = gdb.parse_and_eval('so_list[0][%s]' % (ii))
+    if soinf:
+        print('XX (*so_list)[%s] = (%s) %s_0x%08x:%s -> %s_0x%08x:%s' %
+            ( ii, soinf,
+                soinf['fd'], ntohl(int(soinf['my_addr'])), ntohs(int(soinf['my_port'])),
+                soinf['peer_fd'], ntohl(int(soinf['peer_addr'])), ntohs(int(soinf['peer_port'])) ))
+    elif show_null:
+        print('XX (*so_list)[%s] = (%s) NULL' % (ii, soinf))
+    return
+
+class osv_ipby(gdb.Command):
+    '''osv ipby ...  show info about ipbypass data'''
+    def __init__(self):
+        gdb.Command.__init__(self, 'osv ipby', gdb.COMMAND_USER,
+                             gdb.COMPLETE_NONE, True)
+
+class osv_ipby_sol(gdb.Command):
+    '''osv ipby sol ID  prints info about sock_info in so_list at index ID'''
+    def __init__(self):
+        gdb.Command.__init__(self, 'osv ipby sol',
+                             gdb.COMMAND_USER, gdb.COMPLETE_NONE)
+    def invoke(self, args, from_tty):
+        if args:
+            ii = args.split()[0]
+            #print('ii = %s' % str(ii))
+            ipby_print_so_list_ii(ii)
+        else:
+            for ii in range(9):
+                ipby_print_so_list_ii(ii, False)
+
+
 osv()
 osv_heap()
 osv_memory()
@@ -1604,5 +1648,7 @@ osv_pagetable()
 osv_pagetable_walk()
 osv_runqueue()
 osv_percpu()
+osv_ipby()
+osv_ipby_sol()
 
 setup_libstdcxx()
