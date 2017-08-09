@@ -63,14 +63,14 @@ int _fdalloc(struct file *fp, int *newfd, int min_fd)
 
 int fd_from_file(struct file *fp)
 {
-    int fd;
+    int fd, fd2=-2;
 
     for (fd = 0; fd < FDMAX; fd++) {
         if (gfdt[fd].read() == fp)
-            return fd;
+            fd2 = fd;
     }
 
-    return -2;
+    return fd2;
 }
 
 extern "C"
