@@ -145,7 +145,6 @@ public:
     void call_dtor();
     static sock_info* alloc_ivshmem();
     void free_ivshmem();
-    std::string str();
     const char* c_str();
 public:
 	short flags; // my state etc
@@ -212,8 +211,8 @@ void sock_info::unsafe_remove() {
 	memset(this, 0x00, sizeof(*this));
 }
 
-std::string sock_info::str() {
-	char desc[1024]="";
+const char* sock_info::c_str() {
+	static __thread char desc[1024]="";
 	if( ((uint64_t)(void*)this) != 0) {
 		snprintf(desc, sizeof(desc), "%d:%d_0x%08x:%d<-->%d:%d_0x%08x:%d",
 			my_id, fd, ntohl(my_addr), ntohs(my_port),
@@ -223,11 +222,7 @@ std::string sock_info::str() {
 	else {
 		snprintf(desc, sizeof(desc), "(nullptr)");
 	}
-	return std::string(desc);
-}
-
-const char* sock_info::c_str() {
-	return str().c_str();
+	return desc;
 }
 
 void sock_info::call_dtor() {
