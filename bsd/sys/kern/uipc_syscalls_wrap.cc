@@ -176,6 +176,8 @@ public:
 	// peer_* values are set by connecting peer.
 	sock_info *accept_soinf;
 	sock_info *connecting_soinf;
+	sock_info *listen_soinf;
+	bool is_accepted;
 	uint64_t scan_mod, scan_old;
 };
 
@@ -199,6 +201,8 @@ void sock_info::call_ctor() {
 	peer_fd = -1;
 	accept_soinf = nullptr;
 	connecting_soinf = nullptr;
+	listen_soinf = nullptr;
+	is_accepted = false;
 
 	scan_mod = scan_old = 0;
 }
@@ -305,11 +309,11 @@ size_t sock_info::data_pop(void* buf, size_t len/*, short *so_rcv_state*/) {
 }
 
 
-void sol_insert(int fd, int protocol) {
+sock_info* sol_insert(int fd, int protocol) {
 	sock_info *soinf = sock_info::alloc_ivshmem();
 	fprintf(stderr, "INSERT-ing fd=%d soinf=%p\n", fd, soinf);
 	if (soinf == nullptr)
-		return;
+		return nullptr;
 	soinf->my_id = my_owner_id; // tu je vedno moj VM id
 	soinf->fd = fd;
 	soinf->my_proto = protocol;
@@ -326,6 +330,7 @@ void sol_insert(int fd, int protocol) {
 		fprintf(stderr, "ERROR sol_insert inserting fd=%d soinf=%p, all slots used :/\n", fd, soinf);
 		exit(1);
 	}
+	return soinf;
 }
 
 // Ta naj samo oznaci soinf kot deleted.
@@ -495,6 +500,7 @@ sock_info* sol_find_peer_listening(int fd, uint32_t peer_addr, ushort peer_port)
 Isci soinf, ki ustreza kriterijem.
 Npr peer-a, ki je povezan z mano, na podanem fd:addr:port.
 Pol input param je odvec za iskanje, ampak jih pa lahko preverim (peer fd bi moral biti cisto dovolj).
+Razsiritev: fd==-1 pomeni poljuben fd.
 */
 sock_info* sol_find_full(int fd, uint32_t my_addr, ushort my_port,
 	int peer_fd, uint32_t peer_addr, ushort peer_port) {
@@ -507,11 +513,11 @@ sock_info* sol_find_full(int fd, uint32_t my_addr, ushort my_port,
 			// protocol pa kar ignoriram, jejhetaja.
 			return 	soinf &&
 					(soinf->my_id == my_id) &&
-					(soinf->fd == fd) &&
+					(soinf->fd == fd || -1 == fd) &&
 					(soinf->my_addr == my_addr) &&
 					(soinf->my_port == my_port) &&
 					(soinf->peer_id == peer_id) &&
-					(soinf->peer_fd == peer_fd) &&
+					(soinf->peer_fd == peer_fd || -1 == peer_fd) &&
 					(soinf->peer_addr == peer_addr) &&
 					(soinf->peer_port == peer_port);
 		});
@@ -545,6 +551,29 @@ sock_info* sol_find_peer2(int fd, uint32_t peer_addr, ushort peer_port) {
 	}
 	return *it;
 }
+
+/*
+fd - listening fd.
+returned sock_info - tisti fd2, ki ga bo vrnil accept.
+*/
+sock_info* sol_find_to_be_accepted(int fd) {
+	if (so_list == nullptr)
+		return nullptr;
+	sock_info* soinf_listen = sol_find(fd);
+	assert(soinf_listen);
+	auto it = std::find_if(std::begin(*so_list), std::end(*so_list),
+		[&] (sock_info *soinf) {
+			if (!soinf)
+				return false;
+			return soinf->is_accepted == false && soinf->listen_soinf == soinf_listen;
+		});
+	if (it == std::end(*so_list)) {
+		//fprintf_pos(stderr, "INFO fd=%d nothing to accept\n", fd);
+		return nullptr;
+	}
+	return *it;
+}
+
 bool so_bypass_possible(sock_info* soinf, ushort port) {
 #if IPBYPASS_ENABLED == 0
 	return false;
@@ -612,6 +641,14 @@ bool soi_is_readable(int fd) {
 	if (soinf->connecting_soinf)
 		return true;
 
+	// Poglej, ce je kaksen socket, ki je na koncu syn syn-ack ack.
+	// Za server to pomeni, da je ze dobil ack.
+	// Ce ima ta novi socket isti port kot moj fd, potem ga je sprejel moj fd.
+	sock_info* soinf2 = sol_find_to_be_accepted(fd);
+	if (soinf2) {
+		return true;
+	}
+
 	return false;
 }
 
@@ -675,6 +712,89 @@ bool fd_is_bypassed(int fd) {
 //iperf crkne , ker select javi timeout :/   ??
 //glej Client.cpp Client::write_UDP_FIN
 
+/*
+Server je prejel valid SYN na listen socket.
+Allociraj sock_info za ta novi connection.
+my in peer fd se ne bosta nastavljena,
+*/
+int ipby_server_alloc_sockinfo(int listen_fd,
+	uint32_t my_addr, ushort my_port,
+	uint32_t peer_addr, ushort peer_port)
+{
+	mydebug("listen_fd=%d me:?_0x%08x:%d <- peer:?_0x%08x:%d\n",
+		listen_fd,
+		ntohl(my_addr), ntohs(my_port),
+		ntohl(peer_addr), ntohs(peer_port));
+	sock_info* listen_soinf = sol_find_peer_listening(-1, my_addr, my_port);
+	if (listen_soinf == nullptr)
+		return 0; // bypass disabled for this socket
+	sock_info* soinf = sol_insert(-1, 0);
+	if (soinf == nullptr)
+		return 0; // bypass disabled?
+	assert(listen_fd == listen_soinf->fd);
+	soinf->listen_soinf = listen_soinf;
+	mydebug("link soinf=%p soinf->listen_soinf=%p\n", soinf, soinf->listen_soinf);
+	soinf->bypass(0, -1/*addr*/, 0, -1/*peer_fd*/);
+	//soinf.fd in peer_fd ostaneta -1;
+	assert(my_owner_id == ipv4_addr_to_id(my_addr));
+	soinf->my_id = my_owner_id;
+	soinf->my_addr = my_addr;
+	soinf->my_port = my_port;
+	soinf->peer_fd = -1;
+	soinf->peer_id = ipv4_addr_to_id(peer_addr);
+	soinf->peer_addr = peer_addr;
+	soinf->peer_port = peer_port;
+	soinf->is_accepted = false;
+	// ok, zdaj bo client lahko nasel ta soinf, takrat ko prejme serverjev syn-ack
+	return 0;
+}
+
+/*
+Server user-mode thread izvaja accept().
+Ampak to ni dovolj zgodaj.
+Socket/fd mora biti readable, da ga epoll opazi, sele nato se bo accept nad njim klical.
+Mi je vsaj jasno, zakaj se accept sploh ne klice.
+  TODO kaj ce bi se so ptr notri shranil, ali pa direktno nad njim nastavil readable flag?
+  Oz nad listen fd-jem bi moral nastaviti, da je readable, da bi se potem accept klical, enkrat kasneje.
+*/
+int ipby_server_connect_sockinfo(int fd,
+	uint32_t my_addr, ushort my_port,
+	uint32_t peer_addr, ushort peer_port)
+{
+	mydebug("fd=%d me:?_0x%08x:%d <- peer:?_0x%08x:%d\n",
+		fd,
+		ntohl(my_addr), ntohs(my_port),
+		ntohl(peer_addr), ntohs(peer_port));
+//DBG tid=  248 bsd/sys/kern/uipc_syscalls_wrap.cc:730 ipby_server_connect_sockinfo: fd=8 me:?_0xffffffff:65535 <- peer:?_0xc0a87a5a:17988
+//	sock_info* listen_soinf = NULL;// itak so vsi my_ param -1, ker jih klicatelj ne ve :/ //sol_find_peer_listening(-1, my_addr, my_port);
+	sock_info* soinf;
+	sock_info* soinf_peer;
+	//soinf = sol_find_full(-1, my_addr, my_port, -1, peer_addr, peer_port);
+	soinf_peer = sol_find_peer(-1, peer_addr, peer_port, false/*allow addr_any*/); // cmp my_ a
+	soinf = sol_find_peer2(-1, peer_addr, peer_port); // cmp peer_ attr
+	mydebug("fd=%d me:?_0x%08x:%d <- peer:?_0x%08x:%d; found my soinf=%p, soinf_peer=%p\n",
+		fd,
+		ntohl(my_addr), ntohs(my_port),
+		ntohl(peer_addr), ntohs(peer_port),
+		soinf, soinf_peer);
+	if (soinf) {
+		assert(soinf->fd == -1);
+		soinf->fd = fd;
+
+		// ne . je prezgodaj.
+		//mydebug("fd=%d set is_accepted=true\n");
+		//soinf->is_accepted = true;
+		assert(soinf->listen_soinf != nullptr);
+		assert(soinf->my_port == soinf->listen_soinf->my_port);
+	}
+	if (soinf_peer) {
+		assert(soinf_peer->peer_fd == -1);
+		soinf_peer->peer_fd = fd;
+	}
+
+	// mydebug("link soinf=%p soinf->listen_soinf=%p listen_soinf=%p\n", soinf, soinf->listen_soinf, listen_soinf);
+	return 0;
+}
 
 /*--------------------------------------------------------------------------*/
 
@@ -884,10 +1004,14 @@ int accept_bypass(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__res
 	soinf2->bypass(0, 0xFFFFFFFF, 0, -1); // Kje poslusam jaz, vem. Kdo se bo gor povezal, pa ne vem, zato peer fd = -1, in enako vse ostalo od peer-a.
 	//
 	    //fprintf(stderr, "to-be-accepted BBB fd=%d fd2=%d, soinf2=%p %s\n", fd, fd2, soinf2, soinf2->c_str());
-	assert(soinf2->peer_fd == -1); // kar preverja prejemnik/client
+//	assert(soinf2->peer_fd == -1); // kar preverja prejemnik/client
 	//usleep(10000);
 	soinf->accept_soinf = soinf2;
 
+	mydebug("fd=%d, fd2=%d set is_accepted=true\n", fd, fd2);
+	soinf2->is_accepted = true;
+	assert(soinf2->listen_soinf != nullptr);
+	assert(soinf2->my_port == soinf2->listen_soinf->my_port);
 
 	// kdor se povezuje name, bo nastavil peer fd,addr,port.
 	do {
@@ -947,7 +1071,8 @@ int accept(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__restrict l
 	fprintf_pos(stderr, "BUMP fd=%d, fd2=%d\n", fd, fd2);
 
 #if IPBYPASS_ENABLED
-	sol_insert(fd2, 0);
+	// sol_insert() zdaj kern_accept naredi, v dveh delih.
+	// sol_insert(fd2, 0);
 	error = accept_bypass(fd, addr, len, fd2);
 	if(error) {
 		errno = error;
@@ -1073,6 +1198,9 @@ int connect_from_tcp_etablished_client(int fd, int fd_srv, ushort srv_port)
 	//sleep(2);
 	sock_info *soinf_peer = sol_find_peer(fd, peer_addr, peer_port, false /*allow_inaddr_any*/);
 	// in peer/server fd je ???
+#if IPBYPASS_ENABLED==0
+	return 0;
+#endif
 	assert(soinf);
 return 0;
 	assert(soinf_peer); // ta je nullptr
@@ -1190,8 +1318,13 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 			soinf->peer_port = peer_port;
 		}
 		else {
-			soinf->bypass(peer_id, peer_addr, peer_port, peer_fd);
+			// se izvede
+			soinf->bypass(0, -1/*peer_addr*/, 0, -1/*peer_fd*/);
 		}
+		soinf->peer_id = peer_id;
+		soinf->peer_fd = -1; // to je od listen socket - peer_fd;
+		soinf->peer_addr = peer_addr;
+		soinf->peer_port = peer_port;
 	}
 	else {
 		fprintf_pos(stderr, "INFO connect fd=%d me %s peer %d:%d_0x%08x:%d bypass not possible\n",
@@ -1217,6 +1350,8 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 
 	// To naredi pred linux_connect, da poll koda deluje
 	// TODO: Mixing of normal and byapssed clients will still be a problem, I guess.
+// tega zdaj vec ne bom rabil.
+#if  0
 	if(soinf_peer) {
 		//soinf_peer->connecting_soinf = soinf;
 
@@ -1234,6 +1369,13 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		fprintf_pos(stderr, "INFO fd=%d set ATOMIC connecting_soinf after : obj=%p expected=%p, soinf=%p cnt=%d\n", fd, a_conn_soinf->load(), expected, soinf, cnt);
 		assert(soinf_peer->connecting_soinf == soinf);
 	}
+#endif
+
+	// allociraj soinf za server VM soinf_srv. soinf_srv->listen_soinf nastavi na soinf_peer, da je oznacen,
+	// in ga bo server lahko nasel. soinf_srv - nastavi moj fd,addr,port,peer_addr,peer_port; edino peer_fd se ni znan -
+	// tega bo nastavil server, najbrz kar iz kern_accept.
+	// ker bom novemu soinf_srv nastavil soinf_srv->listen_soinf, ni treba atomic exchnage.
+	// Hm - je tu se kaj takaga, da bi moral cakati na ta nekaj?
 
 do_linux_connect:
 #endif
@@ -1272,6 +1414,52 @@ do_linux_connect:
 	//int getsockname(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 	fprintf_pos(stderr, "INFO soinf before-1: %s\n", soinf->c_str());
 	if (soinf->my_port == 0 || soinf->my_addr == 0xFFFFFFFF || soinf->my_addr == 0x00000000) {
+		// syn se je (verjetno) ze poslal. Najbrz ga je peer VM tudi ze prejel.
+		// Ziher pa zdajle ze lahko vprasmo za moj src_ip/port.
+		struct bsd_sockaddr addr2;
+		socklen_t addr2_len = sizeof(addr2);
+		error = getsockname_orig(fd, &addr2, &addr2_len);
+		if (error) {
+			sock_d("connect / getsockname_orig() failed, error=%d", error);
+			fprintf_pos(stderr, "ERROR connect / getsockname_orig() failed, error=%d\n", error);
+			return -1;
+		}
+		struct sockaddr_in* in_addr2 = (sockaddr_in*)(void*)&addr2;
+		soinf->my_addr = in_addr2->sin_addr.s_addr;
+		soinf->my_port = in_addr2->sin_port;
+		fprintf_pos(stderr, "INFO soinf after-1: %s\n", soinf->c_str());
+		//
+		// da ni prehiter.
+		// TODO - to bi moral zakasniti, in naredit potem, ko dobim nazaj syn-ack.
+		// ker takrat pa vem, da je server ze naredil svoj sock_info.
+		//sleep(2);
+		usleep(1000*200);
+		//
+		mydebug("searching for peer: me:?_0x%08x:%d -> peer:?_0x%08x:%d\n",
+			ntohl(soinf->my_addr), ntohs(soinf->my_port), ntohl(peer_addr), ntohs(peer_port));
+		// soinf2->peer_fd  se ni nastavljen, ker ga server se ni vedel.
+		// soinf2->fd se ni nastavlen, ker server takrat se ni imle allociranega fd-ja.
+		sock_info *soinf2 = nullptr;
+		for (int ii=0; ii<10; ii++) {
+			soinf2 = sol_find_full(-1, peer_addr, peer_port, -1, soinf->my_addr, soinf->my_port);
+			if (soinf2)
+				break;
+			usleep(1000*500);
+		}
+		assert(soinf2);
+		mydebug("found peer soinf2=%p: %d_0x%08x:%d -> %d_0x%08x:%d\n", soinf2,
+			soinf2->fd, ntohl(soinf2->my_addr), ntohs(soinf2->my_port),
+			soinf2->peer_fd, ntohl(soinf2->peer_addr), ntohs(soinf2->peer_port));
+		soinf2->peer_fd = fd;
+		//soinf2->fd == soinf->peer_fd == ? // to bi pa server moral nastaviti. Potem ko ve.
+
+		//usleep(1000);
+		fprintf_pos(stderr, "INFO connect soinf updated fd=%d %s\n", fd, soinf->c_str());
+		fprintf_pos(stderr, "INFO connect soinf_peer    fd=%d %s\n", fd, soinf_peer->c_str());
+		fprintf_pos(stderr, "INFO connect soinf2        fd=%d %s\n", fd, soinf2->c_str());
+	}
+	if (0 ) { // if (soinf->my_port == 0 || soinf->my_addr == 0xFFFFFFFF || soinf->my_addr == 0x00000000) {
+		// OLD code
 		struct bsd_sockaddr addr2;
 		socklen_t addr2_len = sizeof(addr2);
 		error = getsockname_orig(fd, &addr2, &addr2_len);

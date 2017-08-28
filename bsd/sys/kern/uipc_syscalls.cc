@@ -220,6 +220,7 @@ kern_accept(int s, struct bsd_sockaddr *name,
 	int fd;
 	u_int fflag;
 	int tmp;
+	mydebug("ENTER... listen_fd==s=%d\n", s);
 
 	if ((name) && (*namelen < 0)) {
 			return (EINVAL);
@@ -315,8 +316,24 @@ kern_accept(int s, struct bsd_sockaddr *name,
 	error = fdalloc(nfp, &fd);
 	if (error)
 		goto noconnection;
-	debug("fd=%d so=%p so->fp=%p\n", fd, so, so->fp);
-	accept_from_tcp_etablished_server(fd, 0, 0/*peer_addr*/, 0/*peer_port*/); // kdo je client - nimam pojma.
+	mydebug("fd=%d so=%p so->fp=%p\n", fd, so, so->fp);
+	uint32_t peer_addr;
+	ushort peer_port;
+
+	/*
+	struct sockaddr_in* sa_in = (struct sockaddr_in*)sa;
+	peer_addr = sa_in->sin_addr->addr;
+	peer_port = sa_in->sin_port;
+	samo <sys/socket.h> ne smem #include :/
+	Kar "pes" poiscem addr/port via fixed offset v sa.
+	*/
+	peer_addr = *(uint32_t*)(void*) (((char*)(void*)sa)+4);
+	peer_port = *(ushort*)(void*) (((char*)(void*)sa)+2);
+
+	mydebug("DBG peer addr=0x%08x port=%d\n", ntohl(peer_addr), ntohs(peer_port)); // OK, to je prav
+	// kaj pa moj addr:port ?
+	ipby_server_connect_sockinfo(fd, -1, -1, peer_addr, peer_port);
+
 	/* An extra reference on `nfp' has been held for us by fdalloc(). */
 	*out_fd = fd;
 

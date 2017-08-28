@@ -448,6 +448,7 @@ tcp_input_real(struct mbuf *m, int off0)
 	struct inpcb *inp = NULL;
 	struct tcpcb *tp = NULL;
 	struct socket *so = NULL;
+	struct socket *listen_so = NULL;
 	u_char *optp = NULL;
 	int optlen = 0;
 	int len;
@@ -775,6 +776,10 @@ relocked:
 			 * NB: syncache_expand() doesn't unlock
 			 * inp and tcpinfo locks.
 			 */
+			mydebug("TCP ACK XXX server, old so=%p\n", so);
+			// Stari so treba sorwakeup/_locked() - to je tisti socket, nad katerim se je listen() klical.
+			// Novi je tisti, ki ga bo accept vrnil.
+			listen_so = so;
 			if (!syncache_expand(&inc, &to, th, &so, m)) {
 				/*
 				 * No syncache entry or ACK was not
@@ -785,6 +790,10 @@ relocked:
 				rstreason = BANDLIM_RST_OPENPORT;
 				goto dropwithreset;
 			}
+			mydebug("TCP ACK XXX server, new so=%p\n", so);
+
+			mydebug("TCP ACK AAA for server, so=%p so->fp=%p, th->sport=%d th->dport=%d\n",
+				so, so->fp, ntohs(th->th_sport), ntohs(th->th_dport));
 			if (so == NULL) {
 				/*
 				 * We completed the 3-way handshake
@@ -827,8 +836,23 @@ relocked:
 			 * the mbuf chain.
 			 */
 			bool want_close;
+			mydebug("TCP ACK BBB for server, so=%p so->fp=%p, th->sport=%d th->dport=%d\n",
+				so, so->fp, ntohs(th->th_sport), ntohs(th->th_dport));
 			tcp_do_segment(m, th, so, tp, drop_hdrlen, tlen,
 			    iptos, ti_locked, want_close);
+			// INJECT wakeup. TODO - in kdo bi to moral normalno klicati?
+			if (listen_so) {
+				mydebug("                (  data so=%p) sb_notify(sb)==((sb)->sb_flags & (SB_WAIT | SB_SEL | SB_ASYNC | SB_UPCALL | SB_AIO | SB_KNOTE))=0x%08x\n",
+					       so, ((       so->so_rcv).sb_flags & (SB_WAIT | SB_SEL | SB_ASYNC | SB_UPCALL | SB_AIO | SB_KNOTE)) );
+				mydebug("sorwakeup_locked(listen_so=%p) sb_notify(sb)==((sb)->sb_flags & (SB_WAIT | SB_SEL | SB_ASYNC | SB_UPCALL | SB_AIO | SB_KNOTE))=0x%08x soreadable(so)=%d\n",
+					listen_so, ((listen_so->so_rcv).sb_flags & (SB_WAIT | SB_SEL | SB_ASYNC | SB_UPCALL | SB_AIO | SB_KNOTE)),
+					soreadable(listen_so) );
+				mydebug("                 listen_so=%p) soreadabledata(so)=%d\n",
+					listen_so,
+					soreadabledata(listen_so) );
+				mybreak();
+				sorwakeup(listen_so);
+			}
 			INP_INFO_UNLOCK_ASSERT(&V_tcbinfo);
 			// if tcp_close() indeed closes, it also unlocks
 			if (!want_close || tcp_close(tp)) {
@@ -950,11 +974,15 @@ relocked:
 			tcp_trace(TA_INPUT, ostate, tp,
 			    (void *)tcp_saveipgen, &tcp_savetcp, 0);
 #endif
-		int fd = fd_from_file(so->fp);
-		debug("TCP SYN is valid, syncache_add, so=%p so->fp=%p fd=%d, th->sport=%d th->dport=%d\n",
-			so, so->fp, fd, ntohs(th->th_sport), ntohs(th->th_dport));
+		int fd = fd_from_file(so->fp); // to je listen_fd
 		tcp_dooptions(&to, optp, optlen, TO_SYN);
 		syncache_add(&inc, &to, th, inp, &so, m);
+		mydebug("TCP SYN is valid, adding new sock_info fd=%d me:?_0x%08x:%d <- peer:?_0x%08x:%d\n",
+			fd,
+			ntohl(ip->ip_dst.s_addr), ntohs(th->th_dport),
+			ntohl(ip->ip_src.s_addr), ntohs(th->th_sport));
+		ipby_server_alloc_sockinfo(fd, ip->ip_dst.s_addr, th->th_dport, ip->ip_src.s_addr, th->th_sport);
+
 		/*
 		 * Entry added to syncache and mbuf consumed.
 		 * Everything already unlocked by syncache_add().

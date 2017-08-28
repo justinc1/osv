@@ -5,6 +5,16 @@ void mybreak();
 int connect_from_tcp_etablished_client(int fd, int fd_srv, ushort dport);
 int accept_from_tcp_etablished_server(int fd, int fd_clnt, uint32_t peer_addr, ushort peer_port);
 
+int ipby_server_alloc_sockinfo(int listen_fd,
+	uint32_t my_addr, ushort my_port,
+	uint32_t peer_addr, ushort peer_port);
+
+int ipby_server_connect_sockinfo(int fd,
+	uint32_t my_addr, ushort my_port,
+	uint32_t peer_addr, ushort peer_port);
+
+
+
 
 /*----------------------------------------------------------------------------*/
 // Debugging helpers
