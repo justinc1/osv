@@ -1311,11 +1311,8 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 			peer_id, peer_fd, ntohl(peer_addr), ntohs(peer_port));
 		if(soinf->is_bypass) {
 			fprintf_pos(stderr, "INFO already bypass-ed fd me/peer %d %d.\n", fd, peer_fd);
+			//assert(0);
 			// hja, zdaj pa is_bypass je ze true, peer_* pa na defualt vrednostih . jej jej jej. 
-			soinf->peer_id = peer_id;
-			soinf->peer_fd = peer_fd;
-			soinf->peer_addr = peer_addr;
-			soinf->peer_port = peer_port;
 		}
 		else {
 			// se izvede
