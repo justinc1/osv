@@ -63,6 +63,8 @@ TRACEPOINT(trace_poll, "_pfd=%p, _nfds=%lu, _timeout=%d", struct pollfd *, nfds_
 TRACEPOINT(trace_poll_ret, "%d", int);
 TRACEPOINT(trace_poll_err, "%d", int);
 
+#include <osv/ipbypass.h>
+
 using namespace std;
 
 int poll_no_poll(int events)

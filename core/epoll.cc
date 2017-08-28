@@ -24,6 +24,8 @@
 #include <boost/range/algorithm/find.hpp>
 #include <algorithm>
 
+#include <osv/ipbypass.h>
+
 #include <osv/trace.hh>
 TRACEPOINT(trace_epoll_create, "returned fd=%d", int);
 TRACEPOINT(trace_epoll_ctl, "epfd=%d, fd=%d, op=%s event=0x%x", int, int, const char*, int);

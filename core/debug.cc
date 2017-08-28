@@ -79,7 +79,7 @@ bool logger::parse_configuration(void)
     add_tag("acpi", logger_error);
 
     //add_tag("socket-api", logger_debug);
-    add_tag("poll", logger_debug);
+    //add_tag("epoll", logger_debug);
 
     return (true);
 }

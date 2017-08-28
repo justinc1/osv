@@ -68,7 +68,7 @@ socket_file::socket_file(unsigned flags, socket* _so)
     : file(flags, DTYPE_SOCKET, _so)
     , so(_so)
 {
-    debug("fd=?? so=%p so->fp=%p\n", so, so->fp);
+    mydebug("fd=?? so=%p so->fp=%p\n", so, so->fp);
     so->fp = this;
 }
 
@@ -268,6 +268,7 @@ int
 socket_file::poll(int events)
 {
     SOCK_LOCK(so);
+    printf_early("DBG so=%p so_nc=%p\n", so, so->so_nc);
     if (so->so_nc) {
         so->so_nc->process_queue();
     }

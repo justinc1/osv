@@ -434,9 +434,9 @@ void
 tcp_input(struct mbuf *m, int off0)
 {
 	static int cnt=0;
-	debug("ENTER tcp_input depth_cnt=%d\n", cnt++);
+	mydebug("ENTER tcp_input depth_cnt=%d\n", cnt++);
 	tcp_input_real(m, off0);
-	debug("LEAVE tcp_input depth_cnt=%d\n\n", --cnt);
+	mydebug("LEAVE tcp_input depth_cnt=%d\n\n", --cnt);
 }
 
 void
@@ -1222,6 +1222,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			tp->ts_recent = to.to_tsval;
 		}
 
+		//mydebug("so=%p tlen=%d\n", so, tlen);
 		if (tlen == 0) {
 			if (th->th_ack > tp->snd_una &&
 			    th->th_ack <= tp->snd_max &&
@@ -1318,6 +1319,8 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 				else if (!tcp_timer_active(tp, TT_PERSIST))
 					tcp_timer_activate(tp, TT_REXMT,
 						      tp->t_rxtcur);
+				mydebug("sowwakeup_locked(so=%p)\n", so);
+				mybreak();
 				sowwakeup_locked(so);
 				if (so->so_snd.sb_cc)
 					(void) tcp_output(tp);
@@ -1429,6 +1432,8 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 				m_adj(m, drop_hdrlen);	/* delayed header drop */
 				sbappendstream_locked(so, &so->so_rcv, m);
 			}
+			//mydebug("sorwakeup_locked(so=%p)\n", so);
+			mybreak();
 			sorwakeup_locked(so);
 			if (DELAY_ACK(tp)) {
 				tp->t_flags |= TF_DELACK;
@@ -1542,10 +1547,11 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			} else {
 				int fd = -1;
 				fd = fd_from_file(so->fp);
-				debug("TCP set_state TCPS_ESTABLISHED client-side, so=%p so->fp=%p fd=%d\n", so, so->fp, fd);
+				mydebug("TCP set_state TCPS_ESTABLISHED client-side, so=%p so->fp=%p fd=%d\n", so, so->fp, fd);
 				// th->th_sport - listening port od server strani, th->th_dport - random port, iz katerega se client povezuje
 				connect_from_tcp_etablished_client(fd, 0, th->th_sport);
-				mybreak();
+				//mybreak();
+				/**/
 				tp->set_state(TCPS_ESTABLISHED);
 				tcp_setup_net_channel(tp, m->M_dat.MH.MH_pkthdr.rcvif);
 				cc_conn_init(tp);
@@ -1563,6 +1569,8 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			 *        SYN-SENT* -> SYN-RECEIVED*
 			 * If there was no CC option, clear cached CC value.
 			 */
+			mydebug("TCP set_state TCPS_SYN_RECEIVED, simultaneous open, ?/client side, so=%p so->fp=%p sport=%d dport=%d\n", so, so->fp,
+				ntohs(th->th_sport), ntohs(th->th_dport));
 			tp->t_flags |= (TF_ACKNOW | TF_NEEDSYN);
 			tcp_timer_activate(tp, TT_REXMT, 0);
 			tp->set_state(TCPS_SYN_RECEIVED);
@@ -1916,6 +1924,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	if ((thflags & TH_ACK) == 0) {
 		if (tp->get_state() == TCPS_SYN_RECEIVED ||
 		    (tp->t_flags & TF_NEEDSYN))
+			/**/
 			goto step6;
 		else if (tp->t_flags & TF_ACKNOW)
 			goto dropafterack;
@@ -1954,14 +1963,16 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			tp->t_flags &= ~TF_NEEDFIN;
 		} else {
 			int fd=-1;
-			fd = fd_from_file(so->fp);
-			debug("TCP set_state TCPS_ESTABLISHED server-side, so=%p so->fp=%p fd=%d\n", so, so->fp, fd);
+			fd = fd_from_file(so->fp); // tu je se neveljaven fd. kern_accept() bo sele allociral nov fd.
+			mydebug("TCP set_state TCPS_ESTABLISHED server-side, so=%p so->fp=%p fd=%d\n", so, so->fp, fd);
 			//connect_from_tcp_etablished_server(fd, 0);
-			mybreak();
+			//mybreak();
 			tp->set_state(TCPS_ESTABLISHED);
 			tcp_setup_net_channel(tp, m->M_dat.MH.MH_pkthdr.rcvif);
 			cc_conn_init(tp);
 			tcp_timer_activate(tp, TT_KEEP, TP_KEEPIDLE(tp));
+			//fd = fd_from_file(so->fp);
+			//mydebug("TCP set_state TCPS_ESTABLISHED server-side, so=%p so->fp=%p fd=%d\n", so, so->fp, fd);
 		}
 		/*
 		 * If segment contains data or ACK, will call tcp_reass()
@@ -2254,6 +2265,8 @@ process_ACK:
 			tp->snd_wnd -= acked;
 			ourfinisacked = 0;
 		}
+		mydebug("sowwakeup_locked(so=%p)\n", so);
+		//mybreak();
 		sowwakeup_locked(so);
 		/* Detect una wraparound. */
 		if (!IN_RECOVERY(tp->t_flags) &&
@@ -2431,6 +2444,7 @@ dodata:							/* XXX */
 	 * case PRU_RCVD).  If a FIN has already been received on this
 	 * connection then we just ignore the text.
 	 */
+	mydebug("so=%p tlen=%d\n", so, tlen);
 	if ((tlen || (thflags & TH_FIN)) &&
 	    TCPS_HAVERCVDFIN(tp->get_state()) == 0) {
 		tcp_seq save_start = th->th_seq;
@@ -2463,6 +2477,8 @@ dodata:							/* XXX */
 				m_freem(m);
 			else
 				sbappendstream_locked(so, &so->so_rcv, m);
+			mydebug("sorwakeup_locked(so=%p)\n", so);
+			mybreak();
 			sorwakeup_locked(so);
 		} else {
 			/*

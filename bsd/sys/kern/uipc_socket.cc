@@ -130,6 +130,7 @@
 
 #include <osv/debug.hh>
 #define uipc_d(...) tprintf_d("uipc_socket", __VA_ARGS__)
+#include <osv/ipbypass.h>
 
 static int	soreceive_rcvoob(struct socket *so, struct uio *uio,
 		    int flags);

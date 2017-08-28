@@ -18,6 +18,8 @@
 
 #include <bsd/sys/sys/queue.h>
 
+#include <osv/ipbypass.h>
+
 using namespace osv;
 
 /*
@@ -182,10 +184,12 @@ file::file(unsigned flags, filetype_t type, void *opaque) /**/
 void file::wake_epoll(int events)
 {
     WITH_LOCK(f_lock) {
+        //mydebug(" this=fp=%p f_epolls=%p\n", this, &f_epolls);
         if (!f_epolls) {
             return;
         }
         for (auto&& ep : *f_epolls) {
+            //mydebug(" this=fp=%p calling epoll_wake(ep=%p), epoll_wake=%p\n", this, ep, epoll_wake);
             epoll_wake(ep);
         }
     }

@@ -1062,7 +1062,7 @@ linux_bind(int s, void *name, int namelen)
 
 int connect_from_tcp_etablished_client(int fd, int fd_srv, ushort srv_port)
 {
-	debug("connect_from_tcp_etablished_client fd=%d fd_srv=%d srv_port=%lu\n", fd, fd_srv, ntohs(srv_port));
+	mydebug("connect_from_tcp_etablished_client fd=%d fd_srv=%d srv_port=%lu\n", fd, fd_srv, ntohs(srv_port));
 
 	sock_info *soinf = sol_find(fd);
 
@@ -1070,7 +1070,7 @@ int connect_from_tcp_etablished_client(int fd, int fd_srv, ushort srv_port)
 	uint32_t peer_addr = soinf->peer_addr; // pogledam, kati, kam
 	ushort peer_port = srv_port;
 	// peer VM se ni acceptal connection-a - glej kern_accept in fd allokacijo.
-	sleep(2);
+	//sleep(2);
 	sock_info *soinf_peer = sol_find_peer(fd, peer_addr, peer_port, false /*allow_inaddr_any*/);
 	// in peer/server fd je ???
 	assert(soinf);
@@ -1084,7 +1084,7 @@ return 0;
 
 int accept_from_tcp_etablished_server(int fd, int fd_clnt, uint32_t peer_addr, ushort peer_port)
 {
-	debug("accept_from_tcp_etablished_server fd=%d fd_clnt=%d\n", fd, fd_clnt);
+	mydebug("fd=%d fd_clnt=%d\n", fd, fd_clnt);
 
 	struct bsd_sockaddr peer_soaddr;
 	socklen_t peer_soaddr_len = sizeof(peer_soaddr);
@@ -1092,7 +1092,7 @@ int accept_from_tcp_etablished_server(int fd, int fd_clnt, uint32_t peer_addr, u
 	struct sockaddr_in *ss = (struct sockaddr_in *)&peer_soaddr;
 	peer_port = ss->sin_port;
 	peer_addr = ss->sin_addr.s_addr;
-	debug("accept_from_tcp_etablished_server fd=%d fd_clnt=%d, peer_addr/NET=0x%08x, peer_port/HOST=%d\n", fd, fd_clnt, peer_addr, ntohs(peer_port));
+	mydebug("fd=%d fd_clnt=%d, peer_addr/NET=0x%08x, peer_port/HOST=%d\n", fd, fd_clnt, peer_addr, ntohs(peer_port));
 	return 0;
 }
 
