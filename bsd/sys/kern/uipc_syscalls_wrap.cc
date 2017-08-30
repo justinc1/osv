@@ -452,6 +452,8 @@ sock_info* sol_find_peer(int fd, uint32_t peer_addr, ushort peer_port, bool allo
 	auto it = std::find_if(std::begin(*so_list), std::end(*so_list),
 		[&] (sock_info *soinf) {
 			// protocol pa kar ignoriram, jejhetaja.
+			if (soinf == nullptr)
+				return false;
 			bool is_addr_ok;
 			if (allow_inaddr_any) {
 				is_addr_ok = soinf->my_addr == peer_addr || soinf->my_addr == INADDR_ANY;
@@ -481,6 +483,8 @@ sock_info* sol_find_peer_listening(int fd, uint32_t peer_addr, ushort peer_port)
 	auto it = std::find_if(std::begin(*so_list), std::end(*so_list),
 		[&] (sock_info *soinf) {
 			// protocol pa kar ignoriram, jejhetaja.
+			if (soinf == nullptr)
+				return false;
 			bool is_addr_ok;
 			is_addr_ok = soinf->my_addr == peer_addr || soinf->my_addr == INADDR_ANY;
 			return 	soinf &&
