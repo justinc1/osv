@@ -217,14 +217,17 @@ void sock_info::unsafe_remove() {
 
 const char* sock_info::c_str() {
 	static __thread char desc[1024]="";
-	if( ((uint64_t)(void*)this) != 0) {
+	// gcc6 will optimize away "if this != NULL" - use strcmp
+	char tmp[100];
+	snprintf(tmp, sizeof(tmp), "%d", (intptr_t)this);
+	if (0==strcmp(tmp, "0") /* this == NULL */) {
+		snprintf(desc, sizeof(desc), "(nullptr)");
+	}
+	else {
 		snprintf(desc, sizeof(desc), "%d:%d_0x%08x:%d<-->%d:%d_0x%08x:%d",
 			my_id, fd, ntohl(my_addr), ntohs(my_port),
 			peer_id, peer_fd, ntohl(peer_addr), ntohs(peer_port)
 			);
-	}
-	else {
-		snprintf(desc, sizeof(desc), "(nullptr)");
 	}
 	return desc;
 }
