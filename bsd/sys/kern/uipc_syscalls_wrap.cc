@@ -54,7 +54,7 @@ int getsock_cap(int fd, struct file **fpp, u_int *fflagp);
 
 #include <osv/ipbypass.h>
 
-#if 0
+#if 1
 #  undef fprintf_pos
 #  define fprintf_pos(...) /**/
 #  define SENDTO_BYPASS_USLEEP(x)
@@ -71,7 +71,7 @@ int getsock_cap(int fd, struct file **fpp, u_int *fflagp);
 //#define RingBuffer RingBufferV0
 #define RingBuffer RingBuffer_atomic
 
-#define IPBYPASS_ENABLED 0
+#define IPBYPASS_ENABLED 1
 #define IPBYPASS_LOCKED 0
 #define MEM_BARRIER 
 	//asm volatile("" ::: "memory")
