@@ -17,7 +17,7 @@ extern "C" long gettid();
 
 using namespace std;
 
-#define debugf_ivshmem(...)  { if(0) { debugf(__VA_ARGS__); }}
+#define debugf_ivshmem(...)  { if(1) { debugf(__VA_ARGS__); }}
 //static int virtio_ivshmem_read(void *buf, int size);
 
 // sudo ./scripts/run.py -V -n -v --pass-args '--device ivshmem,shm=ivshmem,size=1M' -e '/cli/cli.soXX'

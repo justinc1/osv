@@ -1029,12 +1029,14 @@ int accept_bypass(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__res
 			);
 		sleep(1);
 		*/
-		usleep(0);
+ 
+ 		usleep(0);
 	} while (/*soinf->peer_fd < 0 &&
 		(soinf->peer_addr == 0xFFFFFFFF || soinf->peer_addr == 0x00000000) &&
 		soinf->peer_port == 0 &&*/
 		soinf->accept_soinf->peer_fd < 0);
 		//(*(volatile int*)(void*)&(soinf->accept_soinf->peer_fd)) < 0);
+	// TODO - samo poisci ze allociran sock_info
 
 	// nehaj sprejemati nove povezave
 	soinf->accept_soinf = nullptr;
@@ -1302,6 +1304,7 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 			// najbrz smo server, ki se povezuje nazaj na clienta.
 			// peer of peer-a sem jaz logika
 			// oz kdor ima mene za peer-a, tistega bom jaz imel za peer-a.
+			assert(0);
 			soinf_peer = sol_find_peer2(fd, soinf->my_addr, soinf->my_port);
 		}
 
@@ -1355,7 +1358,7 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	// To naredi pred linux_connect, da poll koda deluje
 	// TODO: Mixing of normal and byapssed clients will still be a problem, I guess.
 // tega zdaj vec ne bom rabil.
-#if  0
+#if 0
 	if(soinf_peer) {
 		//soinf_peer->connecting_soinf = soinf;
 
@@ -1462,7 +1465,7 @@ do_linux_connect:
 		fprintf_pos(stderr, "INFO connect soinf_peer    fd=%d %s\n", fd, soinf_peer->c_str());
 		fprintf_pos(stderr, "INFO connect soinf2        fd=%d %s\n", fd, soinf2->c_str());
 	}
-	if (0 ) { // if (soinf->my_port == 0 || soinf->my_addr == 0xFFFFFFFF || soinf->my_addr == 0x00000000) {
+	if (0) { // if (soinf->my_port == 0 || soinf->my_addr == 0xFFFFFFFF || soinf->my_addr == 0x00000000) {
 		// OLD code
 		struct bsd_sockaddr addr2;
 		socklen_t addr2_len = sizeof(addr2);

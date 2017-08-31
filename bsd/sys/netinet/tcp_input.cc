@@ -948,6 +948,7 @@ relocked:
 		}
 		if (th->th_dport == th->th_sport &&
 		    ip->ip_dst.s_addr == ip->ip_src.s_addr) {
+			 /* bingo */
 			if ((s = tcp_log_addrs(&inc, th, NULL, NULL)))
 			    bsd_log(LOG_DEBUG, "%s; %s: Listen socket: "
 				"Connection attempt from/to self "
@@ -1349,7 +1350,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 						      tp->t_rxtcur);
 				mydebug("sowwakeup_locked(so=%p)\n", so);
 				mybreak();
-				sowwakeup_locked(so);
+				sowwakeup_locked(so); /**/
 				if (so->so_snd.sb_cc)
 					(void) tcp_output(tp);
 				goto check_delack;
@@ -2507,7 +2508,7 @@ dodata:							/* XXX */
 				sbappendstream_locked(so, &so->so_rcv, m);
 			mydebug("sorwakeup_locked(so=%p)\n", so);
 			mybreak();
-			sorwakeup_locked(so);
+			sorwakeup_locked(so); /* XXX XXX XXX */
 		} else {
 			/*
 			 * XXX: Due to the header drop above "th" is
