@@ -1592,10 +1592,12 @@ def ipby_print_so_list_ii(ii, show_null=True):
     soinf = gdb.parse_and_eval('so_list[0][%s]' % (ii))
     soinf_addr = gdb.parse_and_eval('so_list[0][%s]' % (ii))
     if soinf:
-        print('XX (*so_list)[%s] = (%s) %s_0x%08x:%s -> %s_0x%08x:%s' %
+        print('XX (*so_list)[%s] = (%s) %s:%s_0x%08x:%s -> %s:%s_0x%08x:%s, is_accepted=%d, .accept=%s .connecting=%s .lister=%s' %
             ( ii, soinf,
-                soinf['fd'], ntohl(int(soinf['my_addr'])), ntohs(int(soinf['my_port'])),
-                soinf['peer_fd'], ntohl(int(soinf['peer_addr'])), ntohs(int(soinf['peer_port'])) ))
+                soinf['my_id'], soinf['fd'], ntohl(int(soinf['my_addr'])), ntohs(int(soinf['my_port'])),
+                soinf['peer_id'], soinf['peer_fd'], ntohl(int(soinf['peer_addr'])), ntohs(int(soinf['peer_port'])),
+                soinf['is_accepted'], soinf['accept_soinf'], soinf['connecting_soinf'], soinf['listen_soinf']
+                ))
     elif show_null:
         print('XX (*so_list)[%s] = (%s) NULL' % (ii, soinf))
     return
