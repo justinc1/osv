@@ -978,10 +978,22 @@ relocked:
 		int fd = fd_from_file(so->fp); // to je listen_fd
 		tcp_dooptions(&to, optp, optlen, TO_SYN);
 		syncache_add(&inc, &to, th, inp, &so, m);
-		mydebug("TCP SYN is valid, adding new sock_info fd=%d me:?_0x%08x:%d <- peer:?_0x%08x:%d\n",
+#if 0
+		// Zal mydebug pokvari podatke , sklad, se kaj ?
+		// razen, ce je bil wrk array beyond-end access kriv?
+		mydebug("TCP SYN is valid A, adding new sock_info fd=%d me:?_0x%08x:%d <- peer:?_0x%08x:%d\n",
 			fd,
 			ntohl(ip->ip_dst.s_addr), ntohs(th->th_dport),
 			ntohl(ip->ip_src.s_addr), ntohs(th->th_sport));
+		mydebug("TCP SYN is valid B, adding new sock_info fd=%d me:?_0x%08x:%d <- peer:?_0x%08x:%d\n",
+			fd,
+			ntohl(ip->ip_dst.s_addr), ntohs(th->th_dport),
+			ntohl(ip->ip_src.s_addr), ntohs(th->th_sport));
+		mydebug("TCP SYN is valid C, adding new sock_info fd=%d me:?_0x%08x:%d <- peer:?_0x%08x:%d\n",
+			fd,
+			ntohl(ip->ip_dst.s_addr), ntohs(th->th_dport),
+			ntohl(ip->ip_src.s_addr), ntohs(th->th_sport));
+#endif
 		ipby_server_alloc_sockinfo(fd, ip->ip_dst.s_addr, th->th_dport, ip->ip_src.s_addr, th->th_sport);
 
 		/*
@@ -1586,6 +1598,10 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 				cc_conn_init(tp);
 				tcp_timer_activate(tp, TT_KEEP,
 				    TP_KEEPIDLE(tp));
+
+				// debug test
+				// mislim, da tega ne rabim. saj thr se je zbudil, samo wrk ni nic naredil.
+				//sowwakeup(so);
 			}
 		} else {
 			/*

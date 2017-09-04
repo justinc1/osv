@@ -311,6 +311,26 @@ size_t sock_info::data_pop(void* buf, size_t len/*, short *so_rcv_state*/) {
 	return ring_buf.pop(buf, len, &flags);
 }
 
+#define dump_solist(msg) if(1) { \
+	fprintf(stderr, "DBG tid=% 5d %s:%d %s: DUMP_SOLIST start: %s\n", gettid(), __FILE__, __LINE__, __FUNCTION__, msg); \
+	dump_solist_func(); \
+	fprintf(stderr, "DBG tid=% 5d %s:%d %s: DUMP_SOLIST stop\n", gettid(), __FILE__, __LINE__, __FUNCTION__); \
+	}
+
+void dump_solist_func() {
+	sock_info *soinf;
+	int ii;
+	for (ii = 0; so_list && ii < SOCK_INFO_LIST_LEN; ii++) {
+		soinf = (*so_list)[ii];
+		if (soinf  == nullptr) {
+			continue;
+		}
+		fflush(stderr);
+		fprintf(stderr, "    tid=% 5d so_list[%d]=%p soinf=%s\n", gettid(), ii, soinf, soinf->c_str());
+		fflush(stderr);
+	}
+}
+
 
 sock_info* sol_insert(int fd, int protocol) {
 	sock_info *soinf = sock_info::alloc_ivshmem();
@@ -1205,16 +1225,49 @@ int connect_from_tcp_etablished_client(int fd, int fd_srv, ushort srv_port)
 	ushort peer_port = srv_port;
 	// peer VM se ni acceptal connection-a - glej kern_accept in fd allokacijo.
 	//sleep(2);
+	// pa peer se ni vpisal my_fd-ja.
+	dump_solist("BEFORE-client-search");
+#if 0
+	sock_info *sp1 = sol_find_peer(fd, peer_addr, peer_port, false /*allow_inaddr_any*/);
+	usleep(1000*100);
+	sock_info *sp2 = sol_find_peer(fd, peer_addr, peer_port, false /*allow_inaddr_any*/);
+	usleep(1000*100);
+	sock_info *sp3 = sol_find_peer(fd, peer_addr, peer_port, false /*allow_inaddr_any*/);
+	usleep(1000*100);
+	sock_info *sp4 = sol_find_peer(fd, peer_addr, peer_port, false /*allow_inaddr_any*/);
+	usleep(1000*100);
 	sock_info *soinf_peer = sol_find_peer(fd, peer_addr, peer_port, false /*allow_inaddr_any*/);
+	dump_solist("AFTER-client-search");
+	mydebug("FFF soinf_peer= %p %p %p %p ... %p\n", sp1, sp2, sp3, sp4, soinf_peer);
+#else
+	sock_info *soinf_peer = nullptr;
+	int ii = 0;
+	while(ii++ < 10) {
+		soinf_peer = sol_find_peer(fd, peer_addr, peer_port, false /*allow_inaddr_any*/);
+		if (soinf_peer)
+			break;
+		usleep(1001);
+	}
+	mydebug("FFF ii=%d soinf_peer= %p\n", ii, soinf_peer);
+#endif
+	// soinf_peer je NULL, ce ne cakas.
+	// delay pe potreben, da ima server cas nastaviti vrednosti.
 	// in peer/server fd je ???
 #if IPBYPASS_ENABLED==0
 	return 0;
 #endif
 	assert(soinf);
-return 0;
-	assert(soinf_peer); // ta je nullptr
+//return 0;
+	assert(soinf_peer);// ta je nullptr -> vcasih, ali vedno?
 	sol_print(soinf->fd);
 	sol_print(soinf_peer->fd);
+
+	dump_solist("after-delay");
+	mydebug("found peer soinf_peer=%p: %d_0x%08x:%d -> %d_0x%08x:%d\n", soinf_peer,
+		soinf_peer->fd, ntohl(soinf_peer->my_addr), ntohs(soinf_peer->my_port),
+		soinf_peer->peer_fd, ntohl(soinf_peer->peer_addr), ntohs(soinf_peer->peer_port));
+	soinf_peer->peer_fd = soinf->fd;
+	dump_solist("after fix soinf_peer->peer_fd");
 
 	return 0;
 }
@@ -1418,6 +1471,9 @@ do_linux_connect:
 	}
 
 	// ce se ne poznam moje addr/port
+	// BUG - ISR lahko dobi syn-ack, in isce moj addr/port, pa ga ne najde.
+	// ker ga connect user thread se ni nastavil/shranil. Razen ,ce vedno iscem samo po fd-ju.
+	//
 	//int getsockname(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 	fprintf_pos(stderr, "INFO soinf before-1: %s\n", soinf->c_str());
 	if (soinf->my_port == 0 || soinf->my_addr == 0xFFFFFFFF || soinf->my_addr == 0x00000000) {
@@ -1436,10 +1492,22 @@ do_linux_connect:
 		soinf->my_port = in_addr2->sin_port;
 		fprintf_pos(stderr, "INFO soinf after-1: %s\n", soinf->c_str());
 		//
+#if 0
+/*
+To je zdaj v ISR, popravljanje se zadnjega manjkajocega fd-ja.
+
+Morda je pomembno, da vrnem prej, kot pa dobim nazaj syn-ack.
+Tj, da epoll wait zacnem, preden dobim syn-ack.
+morda?
+Zdi se ze tako. Pa vsaj en race se vedno ostaja.
+No, wrk je tudi imel bug, arry beoyd-end usage.
+Je bil to glavni problem?
+*/
 		// da ni prehiter.
 		// TODO - to bi moral zakasniti, in naredit potem, ko dobim nazaj syn-ack.
 		// ker takrat pa vem, da je server ze naredil svoj sock_info.
 		//sleep(2);
+		dump_solist("before-delay");
 		usleep(1000*200);
 		//
 		mydebug("searching for peer: me:?_0x%08x:%d -> peer:?_0x%08x:%d\n",
@@ -1453,17 +1521,22 @@ do_linux_connect:
 				break;
 			usleep(1000*500);
 		}
+		dump_solist("after-delay");
 		assert(soinf2);
 		mydebug("found peer soinf2=%p: %d_0x%08x:%d -> %d_0x%08x:%d\n", soinf2,
 			soinf2->fd, ntohl(soinf2->my_addr), ntohs(soinf2->my_port),
 			soinf2->peer_fd, ntohl(soinf2->peer_addr), ntohs(soinf2->peer_port));
-		soinf2->peer_fd = fd;
+
+		// naj to raje client ISR naredi -> connect_from_tcp_etablished_client
+		//soinf2->peer_fd = fd;
+
 		//soinf2->fd == soinf->peer_fd == ? // to bi pa server moral nastaviti. Potem ko ve.
 
 		//usleep(1000);
 		fprintf_pos(stderr, "INFO connect soinf updated fd=%d %s\n", fd, soinf->c_str());
 		fprintf_pos(stderr, "INFO connect soinf_peer    fd=%d %s\n", fd, soinf_peer->c_str());
 		fprintf_pos(stderr, "INFO connect soinf2        fd=%d %s\n", fd, soinf2->c_str());
+#endif
 	}
 	if (0) { // if (soinf->my_port == 0 || soinf->my_addr == 0xFFFFFFFF || soinf->my_addr == 0x00000000) {
 		// OLD code
@@ -1987,7 +2060,7 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 
 	soinf_peer->modified.store(true, std::memory_order_release);
 	//fprintf_pos(stderr, "fd=%d marking peer_fd=%d as modified\n", fd, soinf_peer->fd);
-SENDTO_BYPASS_USLEEP(1000*500);
+SENDTO_BYPASS_USLEEP(1000*200);
 	return len2;
 
 	/*

@@ -247,7 +247,7 @@ int close(int fd)
         sock_info* soinf = sol_find(fd);
         if (soinf) {
             if(fd==13) {
-                sleep(1);
+                //sleep(1);
             }
             fprintf_pos(stderr, "INFO close-ing socket fd=%d\n", fd);
             sol_remove(fd, -1);

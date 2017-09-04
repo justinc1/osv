@@ -19,16 +19,23 @@ int ipby_server_connect_sockinfo(int fd,
 /*----------------------------------------------------------------------------*/
 // Debugging helpers
 
-long int gettid();
-#define mydebug(fmt, ...) if(0) { fprintf(stderr, "DBG tid=% 5d %s:%d %s: " fmt, gettid(), __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__); }
+extern "C" long gettid(); // from linux.cc
 
-#define printf_early(args...) { \
-	if (0) { \
+#define printf_early_func(args...) { \
     int pos = 0; \
-    char str[2000]; \
+    char str[512]; \
     pos += snprintf(str+pos, sizeof(str)-pos, "DBG tid=%5d %s:%d %s: ", \
         gettid(), __FILE__, __LINE__, __FUNCTION__); \
     pos += snprintf(str+pos, sizeof(str)-pos, args); \
     debug_early(str); \
-	} \
 }
+
+#define printf_early(args...) { if (0) { printf_early_func(args); } }
+
+//#define mydebug(fmt, ...) fprintf(stderr, "DBG tid=% 5d %s:%d %s: " fmt, gettid(), __FILE__, __LINE__, __FUNCTION__, ##__VA_ARGS__)
+#define mydebug(args...) { if (0) { printf_early_func(args); } }
+
+extern const char* dbg_short_file(const char* path);
+//#define __FILE_S__ dbg_short_file(__FILE__)
+//#define fprintf_pos(ff, fmt, ...) { fprintf(ff, "DBG tid=% 5d %s:%d %s " fmt,  gettid(), dbg_short_file(__FILE__), __LINE__, __FUNCTION__, __VA_ARGS__ ); }
+#define fprintf_pos(ff, fmt, ...) { if (0) { printf_early_func(fmt, ##__VA_ARGS__ ); } }

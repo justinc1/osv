@@ -139,6 +139,7 @@ public:
             while (!tmr.expired() && nr == 0) {
                 if (tmo) {
                     _activity_ring_owner.reset(*sched::thread::current());
+                    //mydebug("BEFORE wait_for\n");
                     sched::thread::wait_for(_activity_lock,
                             _waiters,
                             tmr,
@@ -146,6 +147,7 @@ public:
                             [&] { return !_activity_ring.empty(); },
                             [&] { return _activity_ring_overflow.load(std::memory_order_relaxed); }
                     );
+                    //mydebug("AFTER  wait_for\n");
                     _activity_ring_owner.clear();
                 }
 
@@ -279,6 +281,14 @@ int epoll_ctl(int epfd, int op, int fd, struct epoll_event *event)
             op==EPOLL_CTL_MOD ? "EPOLL_CTL_MOD" :
             op==EPOLL_CTL_DEL ? "EPOLL_CTL_DEL" : "?",
                     event ? event->events : 0);
+#if 0
+    mydebug("--- epfd=%d fd=%d op=%s event=0x%08x\n",
+            epfd, fd,
+            op==EPOLL_CTL_ADD ? "EPOLL_CTL_ADD" :
+            op==EPOLL_CTL_MOD ? "EPOLL_CTL_MOD" :
+            op==EPOLL_CTL_DEL ? "EPOLL_CTL_DEL" : "?",
+                    event ? event->events : 0);
+#endif
     fileref epfr(fileref_from_fd(epfd));
     if (!epfr) {
         errno = EBADF;

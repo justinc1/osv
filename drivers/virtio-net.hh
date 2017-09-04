@@ -304,6 +304,8 @@ private:
         rxq(vring* vq, std::function<void ()> poll_func)
             : vqueue(vq), poll_task(sched::thread::make(poll_func, sched::thread::attr().
                                     name("virtio-net-rx"))) {};
+// a treba vecji stakc ali ne? Najbrz ne, wrk je bil problem.
+//                                    name("virtio-net-rx").stack(256 << 10) )) {}; // default size is 64 kB, we used 90 kB (and more?)
         vring* vqueue;
         std::unique_ptr<sched::thread> poll_task;
         struct rxq_stats stats = { 0 };
