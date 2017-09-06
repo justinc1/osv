@@ -1040,6 +1040,7 @@ int accept_bypass(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__res
 	assert(soinf2->listen_soinf != nullptr);
 	assert(soinf2->my_port == soinf2->listen_soinf->my_port);
 
+#if 0
 	// kdor se povezuje name, bo nastavil peer fd,addr,port.
 	do {
 		/*
@@ -1055,6 +1056,7 @@ int accept_bypass(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__res
 		(soinf->peer_addr == 0xFFFFFFFF || soinf->peer_addr == 0x00000000) &&
 		soinf->peer_port == 0 &&*/
 		soinf->accept_soinf->peer_fd < 0);
+#endif
 		//(*(volatile int*)(void*)&(soinf->accept_soinf->peer_fd)) < 0);
 	// TODO - samo poisci ze allociran sock_info
 
@@ -1241,14 +1243,15 @@ int connect_from_tcp_etablished_client(int fd, int fd_srv, ushort srv_port)
 	mydebug("FFF soinf_peer= %p %p %p %p ... %p\n", sp1, sp2, sp3, sp4, soinf_peer);
 #else
 	sock_info *soinf_peer = nullptr;
-	int ii = 0;
-	while(ii++ < 10) {
+	int ii = 0, dT=1;
+
+	while(ii++ < 10*1000/dT) {
 		soinf_peer = sol_find_peer(fd, peer_addr, peer_port, false /*allow_inaddr_any*/);
 		if (soinf_peer)
 			break;
-		usleep(1001);
+		usleep(dT);
 	}
-	mydebug("FFF ii=%d soinf_peer= %p\n", ii, soinf_peer);
+	printf_early_func("FFF ii=%d soinf_peer= %p\n", ii, soinf_peer);
 #endif
 	// soinf_peer je NULL, ce ne cakas.
 	// delay pe potreben, da ima server cas nastaviti vrednosti.
@@ -1950,7 +1953,7 @@ void* bypass_scanner(void *args) {
 		}
 		if (len2 == 0) {
 			// no socket was modified, sleep a bit
-			usleep(0);
+			// usleep(0);
 		}
 	}
 	fprintf(stderr, "bypass_scanner DONE, args=%p\n", args);
