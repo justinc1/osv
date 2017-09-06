@@ -56,7 +56,7 @@ struct tracepoint_patch_sites_type {
 
 tracepoint_patch_sites_type tracepoint_patch_sites;
 
-constexpr size_t trace_page_size = 4096;  // need not match arch page size
+constexpr size_t trace_page_size = 4096*4;  // need not match arch page size
 
 // Having a struct is more complex than it need be for just per-vcpu buffers,
 // _but_ it is in line with later on having rotating buffers, thus wwhy not do it already
@@ -69,6 +69,7 @@ struct trace_buf {
     trace_buf() :
             _base(nullptr), _last(0), _size(0) {
     }
+    /**/
     trace_buf(size_t size) :
             _base(static_cast<char*>(aligned_alloc(sizeof(long), size))), _last(
                     0), _size(size) {
@@ -95,6 +96,7 @@ struct trace_buf {
         return index(_last);
     }
 
+    /**/
     trace_record * allocate_trace_record(size_t size) {
         size += sizeof(trace_record);
         size = align_up(size, sizeof(long));
