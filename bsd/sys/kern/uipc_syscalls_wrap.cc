@@ -2018,6 +2018,12 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	/* vsaj za tcp, bi to zdaj ze moral biti povezano*/
 	peer_fd = soinf->peer_fd;
 	soinf_peer = sol_find_full(soinf->peer_fd, peer_addr, peer_port, fd, soinf->my_addr, soinf->my_port); // should be already connected. TODO - kaj pa ce poslusa na specific IP? Potem bom spet napacen sock_info nasel. Bo reba kar extra flag, ali pa s pointerji povezati.
+	if(soinf_peer == nullptr) {
+		// hm, client je zaprl svoj socket. Recimo...
+		errno = ECONNRESET;
+		trace_ipby_sendto_bypass_err(gettid(), fd);
+		return -1;
+	}
 	assert(soinf_peer && soinf_peer->is_bypass);
 
 	// tole je bilo za udp
