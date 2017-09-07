@@ -954,6 +954,7 @@ int getpeername(int sockfd, struct bsd_sockaddr *addr, socklen_t *addrlen)
 		/* vsaj za tcp, bi to zdaj ze moral biti povezano*/
 		peer_fd = soinf->peer_fd;
 		soinf_peer = sol_find_peer(soinf->peer_fd, peer_addr, peer_port, false); // should be already connected. TODO - kaj pa ce poslusa na specific IP? Potem bom spet napacen sock_info nasel. Bo reba kar extra flag, ali pa s pointerji povezati.
+		assert(soinf_peer);
 		assert(soinf_peer && soinf_peer->is_bypass);
 		fprintf_pos(stderr, "INFO fd=%d peer %s\n", fd, soinf_peer->c_str());
 
