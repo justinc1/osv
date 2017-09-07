@@ -851,7 +851,8 @@ relocked:
 					listen_so,
 					soreadabledata(listen_so) );
 				mybreak();
-				sorwakeup(listen_so);
+// TODO - a bi so ta sorwakeup moral (se) nekje drugje klicati ?
+				//sorwakeup(listen_so);
 			}
 			INP_INFO_UNLOCK_ASSERT(&V_tcbinfo);
 			// if tcp_close() indeed closes, it also unlocks
@@ -1328,6 +1329,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 				 * typically means increasing the congestion
 				 * window.
 				 */
+				/**/
 				cc_ack_received(tp, th, CC_ACK);
 
 				tp->snd_una = th->th_ack;
@@ -1363,6 +1365,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 				mydebug("sowwakeup_locked(so=%p)\n", so);
 				mybreak();
 				sowwakeup_locked(so); /**/
+				sorwakeup_locked(so); /**/
 				if (so->so_snd.sb_cc)
 					(void) tcp_output(tp);
 				goto check_delack;
@@ -1601,7 +1604,10 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 
 				// debug test
 				// mislim, da tega ne rabim. saj thr se je zbudil, samo wrk ni nic naredil.
-				//sowwakeup(so);
+				// Ali pa morda moras zbuditi, ker drugace ima server nginx en 2.7 sec delay na zacetku (vsakega connenctiona?)
+				// client je ze poslal pakete ven, server accept se pa se kar ni zacel izvajati
+				// Ma, najbrz ni treba.
+				sowwakeup(so);
 			}
 		} else {
 			/*
@@ -1986,6 +1992,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	 * In SYN_RECEIVED state, the ack ACKs our SYN, so enter
 	 * ESTABLISHED state and continue processing.
 	 * The ACK was checked above.
+	 bingo
 	 */
 	case TCPS_SYN_RECEIVED:
 
@@ -2018,6 +2025,8 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			tcp_timer_activate(tp, TT_KEEP, TP_KEEPIDLE(tp));
 			//fd = fd_from_file(so->fp);
 			//mydebug("TCP set_state TCPS_ESTABLISHED server-side, so=%p so->fp=%p fd=%d\n", so, so->fp, fd);
+			// tule je najbrz fd od novega socket, ne od listen socket
+			sorwakeup(so);
 		}
 		/*
 		 * If segment contains data or ACK, will call tcp_reass()
