@@ -54,6 +54,14 @@ int getsock_cap(int fd, struct file **fpp, u_int *fflagp);
 
 #include <osv/ipbypass.h>
 
+TIMED_TRACEPOINT(trace_ipby_accept, "tid=%d fd=%d, fd2=%d", long, int, int);
+TIMED_TRACEPOINT(trace_ipby_connect, "tid=%d fd=%d", long, int);
+TIMED_TRACEPOINT(trace_ipby_recvfrom_bypass, "tid=%d fd=%d", long, int);
+//      TRACEPOINT(trace_ipby_recvfrom_bypass_info, "tid=%d fd=%d LINE=%d msg=%s", long, int, int, const char*);
+TIMED_TRACEPOINT(trace_ipby_sendto_bypass, "tid=%d fd=%d", long, int);
+//TIMED_TRACEPOINT(trace_ipby_test, "tid=%d fd=%d", long, int);
+
+
 #if 1
 #  undef fprintf_pos
 #  define fprintf_pos(...) /**/
@@ -1089,6 +1097,7 @@ extern "C"
 int accept(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__restrict len)
 {
 	int fd2, error;
+	trace_ipby_accept(gettid(), fd, -1);
 
 	sock_d("accept(fd=%d, ...)", fd);
 	fprintf_pos(stderr, "BUMP fd=%d\n", fd);
@@ -1097,6 +1106,7 @@ int accept(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__restrict l
 	if (error) {
 		sock_d("accept() failed, errno=%d", error);
 		errno = error;
+		trace_ipby_accept_err(gettid(), fd, fd2);
 		return -1;
 	}
 	fprintf_pos(stderr, "BUMP fd=%d, fd2=%d\n", fd, fd2);
@@ -1107,10 +1117,12 @@ int accept(int fd, struct bsd_sockaddr *__restrict addr, socklen_t *__restrict l
 	error = accept_bypass(fd, addr, len, fd2);
 	if(error) {
 		errno = error;
+		trace_ipby_accept_err(gettid(), fd, fd2);
 		return -1;
 	}
 #endif
 
+	trace_ipby_accept_ret(gettid(), fd, fd2);
 	return fd2;
 }
 
@@ -1295,6 +1307,7 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 {
 	int error;
 
+	trace_ipby_connect(gettid(), fd);
 	sock_d("connect(fd=%d, ...)", fd);
 #if IPBYPASS_ENABLED
 	fprintf_pos(stderr, "INFO connect fd=%d\n", fd);
@@ -1304,6 +1317,7 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	sock_info *soinf = sol_find(fd);
 	if (soinf == nullptr) {
 		fprintf_pos(stderr, "ERROR fd=%d not found\n", fd);
+		trace_ipby_connect_err(gettid(), fd);
 		return -1;
 	}
 
@@ -1368,6 +1382,7 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		// Client pomotoma pozenme prej kot server, in naj bo potem lep error/exit.
 		if (soinf_peer == nullptr) {
 			errno = ECONNREFUSED;
+			trace_ipby_connect_err(gettid(), fd);
 			return -1;
 		}
 
@@ -1450,6 +1465,7 @@ do_linux_connect:
 		fprintf_pos(stderr, "ERROR connect() failed, errno=%d\n", error);
 		errno = error;
 #if IPBYPASS_ENABLED == 0
+		trace_ipby_connect_err(gettid(), fd);
 		return -1;
 #endif
 
@@ -1463,6 +1479,7 @@ do_linux_connect:
 			// no, pa dajmo probati to na tiho ignorirati :/
 			// sej je samo mali iperf server problem....
 			fprintf(stderr, "ERROR connect() failed, errno=%d NA TIHEM IGNORIRAM< da bo vsaj iperf server nekaj lahko vrnil. Tudi ce potem crashne...\n", error);
+			trace_ipby_connect_ret(gettid(), fd);
 			return 0;
 		}
 	}
@@ -1470,6 +1487,7 @@ do_linux_connect:
 #if IPBYPASS_ENABLED
 	if (soinf->is_bypass == false) {
 		// client port is blacklisted - 8000, we disabled bypass.
+		trace_ipby_connect_ret(gettid(), fd);
 		return 0;
 	}
 
@@ -1488,6 +1506,7 @@ do_linux_connect:
 		if (error) {
 			sock_d("connect / getsockname_orig() failed, error=%d", error);
 			fprintf_pos(stderr, "ERROR connect / getsockname_orig() failed, error=%d\n", error);
+			trace_ipby_connect_err(gettid(), fd);
 			return -1;
 		}
 		struct sockaddr_in* in_addr2 = (sockaddr_in*)(void*)&addr2;
@@ -1549,6 +1568,7 @@ Je bil to glavni problem?
 		if (error) {
 			sock_d("connect / getsockname_orig() failed, error=%d", error);
 			fprintf_pos(stderr, "ERROR connect / getsockname_orig() failed, error=%d\n", error);
+			trace_ipby_connect_err(gettid(), fd);
 			return -1;
 		}
 		struct sockaddr_in* in_addr2 = (sockaddr_in*)(void*)&addr2;
@@ -1624,6 +1644,7 @@ Je bil to glavni problem?
 	}
 #endif
 
+	trace_ipby_connect_ret(gettid(), fd);
 	return 0;
 }
 
@@ -1674,6 +1695,7 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 	error = sbwait(so, &so->so_rcv);
 #endif
 
+	trace_ipby_recvfrom_bypass(gettid(), fd);
 	size_t available_read=0;
  	sock_info *soinf = sol_find(fd);
 	//fprintf_pos(stderr, "soinf=%p %d\n", soinf, soinf?soinf->fd:-1);
@@ -1683,6 +1705,7 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 	// ta fd je ze bil pobrisan, in je neveljaven
 	if (soinf->flags & SOR_DELETED) {
 		errno = EBADF;
+		trace_ipby_recvfrom_bypass_err(gettid(), fd);
 		return -1;
 	}
 	// shutdown ali close je ze bil klican, SOR_CLOSED je nastavljen - read se lahko vrne se-neprebrane podatke
@@ -1697,8 +1720,10 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 	struct file *fp;
 	struct socket *so;
 	error = getsock_cap(fd, &fp, NULL);
-	if (error)
+	if (error) {
+		trace_ipby_recvfrom_bypass_err(gettid(), fd);
 		return (error);
+	}
 	so = (socket*)file_data(fp);
 	/* bsd/sys/kern/uipc_socket.cc:2425 */
 	//SOCK_LOCK(so);  // ce dam stran: Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
@@ -1707,6 +1732,7 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 	so_rcv_state = &so->so_rcv.sb_state;
 	//SOCK_UNLOCK(so);
 
+	// trace_ipby_recvfrom_bypass_info(gettid(), fd, __LINE__, "info-1");
 	if( (available_read = soinf->ring_buf.available_read()) <= 0 ) { // za TCP, kjer nimam headerja
 
 		/* bsd/sys/kern/uipc_syscalls.cc:608 +- eps */
@@ -1740,6 +1766,7 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 				errno = EINTR; // to be netperf friendly
 				//SOCK_UNLOCK(so);
 				fdrop(fp); /* TODO PAZI !!! */
+				trace_ipby_recvfrom_bypass_err(gettid(), fd);
 				return -1; // -errno
 			}
 			else if (soinf->flags & SOR_NONBLOCK) {
@@ -1749,10 +1776,12 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 				fprintf_pos(stderr, "fd=%d soinf->flags=0x%x SOR_NONBLOCK\n", fd, soinf->flags);
 				errno = EWOULDBLOCK;
 				fdrop(fp); /* TODO PAZI !!! */
+				trace_ipby_recvfrom_bypass_err(gettid(), fd);
 				return -1;
 			}
 		}
 	}
+	// trace_ipby_recvfrom_bypass_info(gettid(), fd, __LINE__, "info-2");
 
 	/*
 	Socket je bypass-ed. Ne smem iti recvfrom -> linux_recvfrom, ker utegne tam neskoncno dolgo viseti.
@@ -1778,7 +1807,9 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 #endif
 
 	//SOCK_UNLOCK(so); // ker data_pop caka na podatke
-	len2 = soinf->data_pop(buf, len/*, so_rcv_state*/);
+	// trace_ipby_recvfrom_bypass_info(gettid(), fd, __LINE__, "info-3");
+	len2 = soinf->data_pop(buf, len/*, so_rcv_state*/); /* tule obvisi , pri prvem klicu, za par sec. */
+	// trace_ipby_recvfrom_bypass_info(gettid(), fd, __LINE__, "info-4");
 	fprintf_pos(stderr, "fd=%d data_pop len2=%d\n", fd, len2);
 
 	SOCK_LOCK(so);  // ce dam stran: Assertion failed: SOCK_OWNED(so) (bsd/sys/kern/uipc_sockbuf.cc: sbwait_tmo: 144)
@@ -1787,8 +1818,10 @@ ssize_t recvfrom_bypass(int fd, void *__restrict buf, size_t len)
 	so->so_rcv.sb_cc -= len2; // a treba imeti so locked ?
 
 	SOCK_UNLOCK(so);
+	// trace_ipby_recvfrom_bypass_info(gettid(), fd, __LINE__, "info-5");
 	fdrop(fp); /* TODO PAZI !!! */
 
+	trace_ipby_recvfrom_bypass_ret(gettid(), fd);
 	return len2;
 }
 
@@ -1964,21 +1997,26 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
     const struct bsd_sockaddr *addr, socklen_t alen) {
 
 	//return len;
-
+	trace_ipby_sendto_bypass(gettid(), fd);
  	sock_info *soinf = sol_find(fd);
+	// printf_early_func("SEND: %d %s\n", strlen((const char*)buf), buf);
 	fprintf_pos(stderr, "fd=%d len=%d soinf=%p %d\n", fd, len, soinf, soinf?soinf->fd:-1);
 	if(!soinf) {
+		trace_ipby_sendto_bypass_ret(gettid(), fd);
 		return 0;
 	}
 	if (!soinf->is_bypass) {
+		trace_ipby_sendto_bypass_ret(gettid(), fd);
 		return 0;
 	}
 	if (soinf->flags & SOR_DELETED) {
 		errno = EBADF;
+		trace_ipby_sendto_bypass_err(gettid(), fd);
 		return -1;
 	}
 	if (soinf->flags & SOR_CLOSED) {
 		errno = ESHUTDOWN;
+		trace_ipby_sendto_bypass_err(gettid(), fd);
 		return -1;
 	}
 
@@ -2069,7 +2107,8 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 
 	soinf_peer->modified.store(true, std::memory_order_release);
 	//fprintf_pos(stderr, "fd=%d marking peer_fd=%d as modified\n", fd, soinf_peer->fd);
-SENDTO_BYPASS_USLEEP(1000*200);
+//SENDTO_BYPASS_USLEEP(1000*200);
+	trace_ipby_sendto_bypass_ret(gettid(), fd);
 	return len2;
 
 	/*
