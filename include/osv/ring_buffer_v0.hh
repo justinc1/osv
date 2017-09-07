@@ -56,6 +56,11 @@ public:
 public:
 };
 
+#include <osv/trace.hh>
+#include <osv/ipbypass.h>
+TIMED_TRACEPOINT(trace_ipby_ringA_push, "tid=%d LINE=%d this=%p len=%d", long, int, void*, unsigned int);
+TIMED_TRACEPOINT(trace_ipby_ringA_pop, "tid=%d LINE=%d this=%p len=%d", long, int, void*, unsigned int);
+
 class RingBuffer_atomic : public ring_buffer_spsc<BYPASS_BUF_SZ> {
 public:
 	RingBuffer_atomic() {
@@ -109,26 +114,37 @@ public:
     }
 public:
 	size_t push(const void* buf, size_t len) {
+		trace_ipby_ringA_push(gettid(), __LINE__, this, len);
 		size_t ret;
 		if (len == 0) {
+			trace_ipby_ringA_push_err(gettid(), __LINE__, this, len);
 			return 0;
 		}
 		while (0 == (ret = ring_buffer_spsc::push(buf, len))) {
 		}
 		wpos_cum += ret;
 		wpos_cum2 += ret;
+		trace_ipby_ringA_push_ret(gettid(), __LINE__, this, ret);
 		return ret;
 	}
 	size_t pop(void* buf, size_t len, short *flags=nullptr) {
 		size_t ret;
+		trace_ipby_ringA_pop(gettid(), __LINE__, this, len);
 		while (0 == (ret = ring_buffer_spsc::pop(buf, len))) {
 			if (flags && (*flags & SOR_CLOSED)) {
 				// cantrecv is set, socket was closed while reading
 				break;
 			}
+			/*
+			Torej tu caka reader.
+			Samo ce je writer vpisal, pa reader ne opazi.
+			Saj berem kot atomic_int.
+			*/
 		}
 		rpos_cum += ret;
 		rpos_cum2 += ret;
+		trace_ipby_ringA_pop_ret(gettid(), __LINE__, this, ret);
+		if(0) {trace_ipby_ringA_pop_err(gettid(), __LINE__, this, ret);}
 		return ret;
 	}
 public:

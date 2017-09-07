@@ -27,6 +27,10 @@
 #define my_memcpy(dd,ss,ll) memcpy(dd,ss,ll)
 //#define my_memcpy(dd,ss,ll) {if(0) memcpy(dd,ss,ll);}
 
+#include <osv/trace.hh>
+TRACEPOINT(trace_ipby_ring_pop, "tid=%d LINE=%d this=%p len=%d, sz=%d, len2=%d", long, int, void*, unsigned int, unsigned int, unsigned int);
+
+
 //
 // spsc ring of fixed size
 // intended to store stream of data (not pointer/reference to elements)
@@ -175,6 +179,9 @@ public:
             return 0;
         len2 = len;
 #endif
+        if(sz!=0) {
+            trace_ipby_ring_pop(gettid(), __LINE__, this, len, sz, len2); // ze do tu traja dolgo casa
+        }
 
         //element = _ring[beg & MaxSizeMask];
         //TODO - split into two memcpy calls
@@ -197,6 +204,9 @@ public:
             ASSERT(beg + len2_p1 <= MaxSize); // mora biti vedno ==
             my_memcpy(buf, _ring + beg, len2_p1);
             my_memcpy(buf + len2_p1, _ring, len2_p2);
+        }
+        if(sz!=0) {
+            trace_ipby_ring_pop(gettid(), __LINE__, this, len, sz, len2);
         }
         //rpos_cum += len;
         
