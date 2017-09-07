@@ -1,3 +1,6 @@
+#ifndef __IPBYPASS_H__
+#define __IPBYPASS_H__
+
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -39,3 +42,18 @@ extern const char* dbg_short_file(const char* path);
 //#define __FILE_S__ dbg_short_file(__FILE__)
 //#define fprintf_pos(ff, fmt, ...) { fprintf(ff, "DBG tid=% 5d %s:%d %s " fmt,  gettid(), dbg_short_file(__FILE__), __LINE__, __FUNCTION__, __VA_ARGS__ ); }
 #define fprintf_pos(ff, fmt, ...) { if (0) { printf_early_func(fmt, ##__VA_ARGS__ ); } }
+
+
+
+#include <osv/trace.hh>
+//TRACEPOINT(trace_ipby_accept, "tid=%x fd=%d, fd2=%d", long, int, int);
+//TRACEPOINT(trace_ipby_accept_ret, "tid=%x fd=%d, fd2=%d", long, int, int);
+//TRACEPOINT(trace_ipby_accept_err, "tid=%x fd=%d, fd2=%d", long, int, int);
+
+
+#define TIMED_TRACEPOINT(name, args...) \
+    TRACEPOINT(name, args); \
+    TRACEPOINT(name ## _ret, args); \
+    TRACEPOINT(name ## _err, args);
+
+#endif // __IPBYPASS_H__
