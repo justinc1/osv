@@ -96,6 +96,10 @@
 
 TRACEPOINT(trace_tcp_input_ack, "%p: We've got ACK: %u", void*, unsigned int);
 
+TIMED_TRACEPOINT(trace_tin_input, "tid=%d", long);
+      TRACEPOINT(trace_tin_input_info, "tid=%d line=%d msg=%s so=%p so2=%p sport=%d dport=%d", long, int, const char*, void*, void*, short, short);
+
+
 const int tcprexmtthresh = 3;
 
 VNET_DEFINE(struct tcpstat, tcpstat);
@@ -434,10 +438,14 @@ void
 tcp_input(struct mbuf *m, int off0)
 {
 	static int cnt=0;
+	trace_tin_input(gettid());
 	mydebug("ENTER tcp_input depth_cnt=%d\n", cnt++);
 	tcp_input_real(m, off0);
 	mydebug("LEAVE tcp_input depth_cnt=%d\n\n", --cnt);
+	trace_tin_input_ret(gettid());
 }
+
+struct socket *g_listen_so = NULL;
 
 void
 tcp_input_real(struct mbuf *m, int off0)
@@ -854,11 +862,13 @@ relocked:
 // TODO - a bi so ta sorwakeup moral (se) nekje drugje klicati ?
 				//sorwakeup(listen_so);
 			}
+			trace_tin_input_info(gettid(), __LINE__, "conn-accepted", listen_so, so, ntohs(th->th_sport), ntohs(th->th_dport));
 			INP_INFO_UNLOCK_ASSERT(&V_tcbinfo);
 			// if tcp_close() indeed closes, it also unlocks
 			if (!want_close || tcp_close(tp)) {
 				INP_UNLOCK(inp);
 			}
+			//sorwakeup(listen_so); // ne naredi nic, se so->so_rcv.sb_flags |= SB_SEL ali SB_AIO ali kar ze flag ni nastavljen
 			return;
 		}
 		/*
@@ -977,8 +987,13 @@ relocked:
 			    (void *)tcp_saveipgen, &tcp_savetcp, 0);
 #endif
 		int fd = fd_from_file(so->fp); // to je listen_fd
+		listen_so = so; // ker syncache_add() nastavi so na NULL
+		g_listen_so = so;
+		mydebug("TCP SYN so->so_rcv.sb_flags 0x%08x 0x%08x\n", so? so->so_rcv.sb_flags: -1, g_listen_so->so_rcv.sb_flags)
 		tcp_dooptions(&to, optp, optlen, TO_SYN);
+		mydebug("TCP SYN so->so_rcv.sb_flags 0x%08x 0x%08x\n", so? so->so_rcv.sb_flags: -1, g_listen_so->so_rcv.sb_flags)
 		syncache_add(&inc, &to, th, inp, &so, m);
+		mydebug("TCP SYN so->so_rcv.sb_flags 0x%08x 0x%08x\n", so? so->so_rcv.sb_flags: -1, g_listen_so->so_rcv.sb_flags)
 #if 0
 		// Zal mydebug pokvari podatke , sklad, se kaj ?
 		// razen, ce je bil wrk array beyond-end access kriv?
@@ -996,6 +1011,7 @@ relocked:
 			ntohl(ip->ip_src.s_addr), ntohs(th->th_sport));
 #endif
 		ipby_server_alloc_sockinfo(fd, ip->ip_dst.s_addr, th->th_dport, ip->ip_src.s_addr, th->th_sport);
+		mydebug("TCP SYN so->so_rcv.sb_flags 0x%08x 0x%08x\n", so? so->so_rcv.sb_flags: -1, g_listen_so->so_rcv.sb_flags)
 
 		/*
 		 * Entry added to syncache and mbuf consumed.

@@ -243,6 +243,7 @@ void so_wake_poll(struct socket *so, struct sockbuf *sb)
  * then release it to avoid lock order issues.  It's not clear that's
  * correct.
  */
+TRACEPOINT(trace_tin_sowakeup_info, "tid=%d line=%d msg=%s so=%p", long, int, const char*, void*);
 void
 sowakeup(struct socket *so, struct sockbuf *sb)
 {

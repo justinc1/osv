@@ -249,10 +249,16 @@ extern "C" void sowakeup(socket* so, sockbuf* sb);
  * In sorwakeup() and sowwakeup(), acquire the socket buffer lock to
  * avoid a non-atomic test-and-wakeup.
  */
+TRACEPOINT(trace_tin_wakeup_info, "tid=%d line=%d msg=%s so=%p so_rcv=%p sb_flags=0x%08x", long, int, const char*, void*, void*, int);
 inline void sorwakeup_locked(socket* so) {
 	SOCK_LOCK_ASSERT(so);
+	trace_tin_wakeup_info(gettid(), __LINE__, "sorwakeup_locked", so, &so->so_rcv, so->so_rcv.sb_flags);
 	if (sb_notify(&so->so_rcv)) {
+		trace_tin_wakeup_info(gettid(), __LINE__, "sorwakeup_locked - yes", so, &so->so_rcv, so->so_rcv.sb_flags);
 		sowakeup(so, &so->so_rcv);
+	}
+	else {
+		trace_tin_wakeup_info(gettid(), __LINE__, "sorwakeup_locked - no", so, &so->so_rcv, so->so_rcv.sb_flags);
 	}
 }
 
