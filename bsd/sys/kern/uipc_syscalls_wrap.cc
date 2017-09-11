@@ -563,6 +563,40 @@ sock_info* sol_find_full(int fd, uint32_t my_addr, ushort my_port,
 	return *it;
 }
 
+/*
+    tid=   41 so_list[0]=0xffff80008fc57320 soinf=90:6_0x00000000:8000<-->0:-1_0xffffffff:0
+    tid=   41 so_list[1]=0xffff800090c5b320 soinf=90:-1_0xc0a87a5a:8080<-->90:-1_0xc0a87a5a:48183    server, ki je zacel sprejamati conn. Tega iscem
+    tid=   41 so_list[2]=0xffff800090459320 soinf=90:8_0xc0a87a5a:8080<-->0:-1_0xffffffff:0          server listne socket
+    tid=   41 so_list[3]=0xffff80009085a320 soinf=90:10_0xffffffff:0<-->90:-1_0xc0a87a5a:8080        client, ki se ni povsem povezan.
+
+Client ne ve: svojega fd-ja, addr, port. Samo to ve, kam se hoce povezati.
+Problem, ce je vec kot en hkraten conn na isti server.
+*/
+sock_info* sol_find_server_half_connected(
+	int peer_fd, uint32_t peer_addr, ushort peer_port) {
+	if (so_list == nullptr)
+		return nullptr;
+	uint32_t my_id = my_owner_id; //ipv4_addr_to_id(my_addr);
+	uint32_t peer_id = ipv4_addr_to_id(peer_addr);
+	auto it = std::find_if(std::begin(*so_list), std::end(*so_list),
+		[&] (sock_info *soinf) {
+			// protocol pa kar ignoriram, jejhetaja.
+			return 	soinf &&
+					(soinf->my_id == peer_id) &&
+					(soinf->fd == -1) &&
+					(soinf->my_addr == peer_addr) &&
+					(soinf->my_port == peer_port) &&
+					(soinf->peer_id == my_id) &&
+					(soinf->peer_fd == -1) &&
+					(soinf->peer_addr != 0xFFFFFFFF) && /* tega je ze server koda nastavila - ko prejme SYN paket */
+					(soinf->peer_port != 0);
+		});
+	if (it == std::end(*so_list)) {
+		fprintf_pos(stderr, "ERROR fd=%d peer %d:??_0x%08x:%d not found\n", fd, peer_id, ntohl(peer_addr), ntohs(peer_port));
+		return nullptr;
+	}
+	return *it;
+}
 
 sock_info* sol_find_peer2(int fd, uint32_t peer_addr, ushort peer_port) {
 	if (so_list == nullptr)
@@ -1233,6 +1267,11 @@ int connect_from_tcp_etablished_client(int fd, int fd_srv, ushort srv_port)
 {
 	mydebug("connect_from_tcp_etablished_client fd=%d fd_srv=%d srv_port=%lu\n", fd, fd_srv, ntohs(srv_port));
 
+	if (srv_port == htons(8000)) {
+		// ignore for REST api
+		return 0;
+	}
+
 	sock_info *soinf = sol_find(fd);
 
 	//sock_info *soinf_peer = sol_find_peer(int fd, uint32_t peer_addr, ushort peer_port, bool allow_inaddr_any) sol_find(fd);
@@ -1258,8 +1297,18 @@ int connect_from_tcp_etablished_client(int fd, int fd_srv, ushort srv_port)
 	sock_info *soinf_peer = nullptr;
 	int ii = 0, dT=1;
 
+	// soinf my_addr port se nista nastavljena. Clinet se ni koncal svojega connect().
+	// Oz je koncal z errno=EINPROGRESS, ni pa se dobil syn-ack nazaj.
+	assert(soinf->my_addr == 0xFFFFFFFF);
+	assert(soinf->my_port == 0);
+	//usleep(1000*10);
+	mydebug("  doing sol_find_server_half_connected(peer_fd=%d, peer_addr=0x%08x, peer_port=%d);",
+		-1, ntohl(peer_addr), ntohs(peer_port));
+
 	while(ii++ < 10*1000/dT) {
-		soinf_peer = sol_find_peer(fd, peer_addr, peer_port, false /*allow_inaddr_any*/);
+		// tale je nasel tudi server listening socket, in ga potem popravil :/
+		// soinf_peer = sol_find_peer(fd, peer_addr, peer_port, false /*allow_inaddr_any*/);
+		soinf_peer = sol_find_server_half_connected(-1, peer_addr, peer_port);
 		if (soinf_peer)
 			break;
 		usleep(dT);
