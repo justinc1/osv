@@ -1359,6 +1359,50 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 
 	trace_ipby_connect(gettid(), fd);
 	sock_d("connect(fd=%d, ...)", fd);
+
+#if IPBYPASS_ENABLED
+	struct sockaddr_in* in_addr = (sockaddr_in*)(void*)addr;
+	uint32_t peer_addr = in_addr->sin_addr.s_addr;
+	ushort peer_port = in_addr->sin_port;
+	int peer_fd = -1;
+	uint32_t peer_id = ipv4_addr_to_id(peer_addr);
+	sock_info *soinf_peer = nullptr;
+
+	struct sockaddr_in out_addr;
+	uint32_t my_addr = 0x00000000;
+	ushort my_port = 0;
+	if (so_bypass_possible(nullptr, peer_port) &&
+		((peer_addr & htonl(0xFFFFFF00)) == (my_ip_addr & htonl(0xFFFFFF00))) /* assume /24 subnet, network byte order */
+		) {
+		out_addr.sin_family = AF_INET;
+		out_addr.sin_addr.s_addr = my_ip_addr;
+		//c.sin_addr.s_addr = 0x00000000;
+		out_addr.sin_port = 0;
+		error = linux_bind(fd, &out_addr, sizeof(out_addr));
+		if (error) {
+			fprintf_pos(stderr, "linux_bind failed :/, fd=%d\n", fd);
+		}
+		else {
+			fprintf_pos(stderr, "linux_bind OK, fd=%d\n", fd);
+		}
+		socklen_t out_addr_len;
+		out_addr_len = sizeof(out_addr);
+		error = getsockname_orig(fd, (struct bsd_sockaddr*)&out_addr, &out_addr_len);
+		if (error) {
+			fprintf_pos(stderr, "getsockname_orig failed :/, fd=%d\n", fd);
+			errno = error;
+			return -1;
+		}
+		else {
+			fprintf_pos(stderr, "getsockname_orig OK, fd=%d\n", fd);
+		}
+		my_addr = out_addr.sin_addr.s_addr;
+		my_port = out_addr.sin_port;
+	}
+	fprintf_pos(stderr, "my_addr=0x%08x:%d\n", ntohl(my_addr), ntohs(my_port));
+
+#endif
+
 #if IPBYPASS_ENABLED
 	fprintf_pos(stderr, "INFO connect fd=%d\n", fd);
 
@@ -1376,13 +1420,6 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	client se povezuje na server, ki se ne tece
 	server se povezuje "nazaj" na client, ki ze tece.
 	*/
-
-	struct sockaddr_in* in_addr = (sockaddr_in*)(void*)addr;
-	uint32_t peer_addr = in_addr->sin_addr.s_addr;
-	ushort peer_port = in_addr->sin_port;
-	int peer_fd = -1;
-	uint32_t peer_id = ipv4_addr_to_id(peer_addr);
-	sock_info *soinf_peer = nullptr;
 
 	// blacklist port 8000 - REST api
 	if (peer_port == htons(8000)) {
@@ -1453,6 +1490,9 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		soinf->peer_fd = -1; // to je od listen socket - peer_fd;
 		soinf->peer_addr = peer_addr;
 		soinf->peer_port = peer_port;
+		// ker sem naredil bind pred conenct, ze imam moj addr/port
+		soinf->my_addr = my_addr;
+		soinf->my_port = my_port;
 	}
 	else {
 		fprintf_pos(stderr, "INFO connect fd=%d me %s peer %d:%d_0x%08x:%d bypass not possible\n",
