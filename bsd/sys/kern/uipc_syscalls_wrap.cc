@@ -563,6 +563,41 @@ sock_info* sol_find_full(int fd, uint32_t my_addr, ushort my_port,
 	return *it;
 }
 
+ /*
+tid=   41 so_list[0]=0xffff80008fc57320 soinf=90:6_0x00000000:8000<-->0:-1_0xffffffff:0
+tid=   41 so_list[1]=0xffff800090c5b320 soinf=90:-1_0xc0a87a5a:8080<-->90:-1_0xc0a87a5a:48183    server, ki je zacel sprejamati conn
+tid=   41 so_list[2]=0xffff800090459320 soinf=90:8_0xc0a87a5a:8080<-->0:-1_0xffffffff:0          server listne socket
+tid=   41 so_list[3]=0xffff80009085a320 soinf=90:10_0xffffffff:0<-->90:-1_0xc0a87a5a:8080        client, ki se ni povsem povezan. Tega iscem
+
+Client ne ve: svojega fd-ja, addr, port. Samo to ve, kam se hoce povezati.
+Problem, ce je vec kot en hkraten conn na isti server.
+*/
+sock_info* sol_find_client_half_connected(
+	int peer_fd, uint32_t peer_addr, ushort peer_port) {
+	if (so_list == nullptr)
+		return nullptr;
+	uint32_t my_id = my_owner_id; //ipv4_addr_to_id(my_addr);
+	uint32_t peer_id = ipv4_addr_to_id(peer_addr);
+	auto it = std::find_if(std::begin(*so_list), std::end(*so_list),
+		[&] (sock_info *soinf) {
+			// protocol pa kar ignoriram, jejhetaja.
+			return 	soinf &&
+					(soinf->my_id == my_id) &&
+					(soinf->fd == -1) &&
+					(soinf->my_addr == 0xFFFFFFFF) &&
+					(soinf->my_port == 0) &&
+					(soinf->peer_id == peer_id) &&
+					(soinf->peer_fd == -1) &&
+					(soinf->peer_addr == peer_addr) &&
+					(soinf->peer_port == peer_port);
+		});
+	if (it == std::end(*so_list)) {
+		fprintf_pos(stderr, "ERROR peer %d:??_0x%08x:%d not found\n", peer_id, ntohl(peer_addr), ntohs(peer_port));
+		return nullptr;
+	}
+	return *it;
+}
+
 /*
     tid=   41 so_list[0]=0xffff80008fc57320 soinf=90:6_0x00000000:8000<-->0:-1_0xffffffff:0
     tid=   41 so_list[1]=0xffff800090c5b320 soinf=90:-1_0xc0a87a5a:8080<-->90:-1_0xc0a87a5a:48183    server, ki je zacel sprejamati conn. Tega iscem
@@ -584,7 +619,11 @@ sock_info* sol_find_server_half_connected(
 			return 	soinf &&
 					(soinf->my_id == peer_id) &&
 					(soinf->fd == -1) &&
-					(soinf->my_addr == peer_addr) &&
+					(soinf->my_addr == peer_addr
+#if 1
+						|| (peer_addr==-1 && soinf->my_addr!=-1)
+#endif
+						) &&
 					(soinf->my_port == peer_port) &&
 					(soinf->peer_id == my_id) &&
 					(soinf->peer_fd == -1) &&
@@ -592,7 +631,7 @@ sock_info* sol_find_server_half_connected(
 					(soinf->peer_port != 0);
 		});
 	if (it == std::end(*so_list)) {
-		fprintf_pos(stderr, "ERROR fd=%d peer %d:??_0x%08x:%d not found\n", fd, peer_id, ntohl(peer_addr), ntohs(peer_port));
+		fprintf_pos(stderr, "ERROR peer %d:??_0x%08x:%d not found\n", peer_id, ntohl(peer_addr), ntohs(peer_port));
 		return nullptr;
 	}
 	return *it;
@@ -671,7 +710,9 @@ bool so_bypass_possible(sock_info* soinf, ushort port) {
 	// blacklist port 8000 - REST api
 	if (port == htons(8000)) {
 		do_bypass = false;
-		soinf->is_bypass = false;
+		if (soinf) {
+			soinf->is_bypass = false;
+		}
 		fprintf(stderr, "DO NOT BYPASS PORT 8000, soinf=%p %s\n", soinf, soinf->c_str());
 		fprintf_pos(stderr, "DO NOT BYPASS PORT 8000, soinf=%p %s\n", soinf, soinf->c_str());
 	}
@@ -958,7 +999,8 @@ int getpeername(int sockfd, struct bsd_sockaddr *addr, socklen_t *addrlen)
 	int error;
 
 	sock_d("getpeername(sockfd=%d, ...)", sockfd);
-#if IPBYPASS_ENABLED
+// recimo, da tega vec ni treba, da sedaj bo vedno delalo
+#if 0 // IPBYPASS_ENABLED
 	if (fd_is_bypassed(sockfd)) {
 		int fd = sockfd;
 		sock_info *soinf = sol_find(fd);
@@ -1299,8 +1341,12 @@ int connect_from_tcp_etablished_client(int fd, int fd_srv, ushort srv_port)
 
 	// soinf my_addr port se nista nastavljena. Clinet se ni koncal svojega connect().
 	// Oz je koncal z errno=EINPROGRESS, ni pa se dobil syn-ack nazaj.
-	assert(soinf->my_addr == 0xFFFFFFFF);
-	assert(soinf->my_port == 0);
+	// Hm, mozno, da to proba nastaviti in clent in server koda. Potem, kdo je privi?
+	assert(soinf->my_addr == 0xFFFFFFFF || soinf->my_addr == my_ip_addr);
+	if (soinf->my_addr == 0xFFFFFFFF) {
+		// race cond, v najboljsem primeru.
+		//assert(soinf->my_port == 0);
+	}
 	//usleep(1000*10);
 	mydebug("  doing sol_find_server_half_connected(peer_fd=%d, peer_addr=0x%08x, peer_port=%d);",
 		-1, ntohl(peer_addr), ntohs(peer_port));
@@ -1323,6 +1369,9 @@ int connect_from_tcp_etablished_client(int fd, int fd_srv, ushort srv_port)
 #endif
 	assert(soinf);
 //return 0;
+	// my je client , peer je server stran
+// TODO - bind local port pred connect, da je znan
+// potem isci peer_addr=? ali -1, peer_port, my_addr, my_port
 	assert(soinf_peer);// ta je nullptr -> vcasih, ali vedno?
 	sol_print(soinf->fd);
 	sol_print(soinf_peer->fd);
@@ -1719,10 +1768,13 @@ Je bil to glavni problem?
 #if 1
 		// after some delay, this should be true
 		int ii;
-		for (ii=0; ii<1000* 10; ii++) {
+		int nn;
+		nn=10*1000;
+		nn=10;
+		for (ii=0; ii<nn; ii++) {
 			if (soinf_peer->connecting_soinf != soinf)
 				break;
-			usleep(1000*1);
+			usleep(10*1000*1000 / nn);
 		}
 		fprintf_pos(stderr, "INFO waiting on soinf_peer->connecting_soinf to be NULL, ii=%d, connecting_soinf=%p...\n", ii, soinf_peer->connecting_soinf);
 		assert(soinf_peer->connecting_soinf != soinf); // most often, should be == NULL

@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <osv/trace.hh>
 
 void mybreak();
 int connect_from_tcp_etablished_client(int fd, int fd_srv, ushort dport);
@@ -45,7 +46,6 @@ extern const char* dbg_short_file(const char* path);
 
 
 
-#include <osv/trace.hh>
 //TRACEPOINT(trace_ipby_accept, "tid=%x fd=%d, fd2=%d", long, int, int);
 //TRACEPOINT(trace_ipby_accept_ret, "tid=%x fd=%d, fd2=%d", long, int, int);
 //TRACEPOINT(trace_ipby_accept_err, "tid=%x fd=%d, fd2=%d", long, int, int);
