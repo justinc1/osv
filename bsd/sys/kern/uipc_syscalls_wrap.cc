@@ -62,7 +62,7 @@ TIMED_TRACEPOINT(trace_ipby_sendto_bypass, "tid=%d fd=%d", long, int);
 //TIMED_TRACEPOINT(trace_ipby_test, "tid=%d fd=%d", long, int);
 
 
-#if 0
+#if 1
 #  undef fprintf_pos
 #  define fprintf_pos(...) /**/
 #  define SENDTO_BYPASS_USLEEP(x)
