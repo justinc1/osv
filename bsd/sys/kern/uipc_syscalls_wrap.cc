@@ -62,7 +62,7 @@ TIMED_TRACEPOINT(trace_ipby_sendto_bypass, "tid=%d fd=%d", long, int);
 //TIMED_TRACEPOINT(trace_ipby_test, "tid=%d fd=%d", long, int);
 
 
-#if 1
+#if 0
 #  undef fprintf_pos
 #  define fprintf_pos(...) /**/
 #  define SENDTO_BYPASS_USLEEP(x)
@@ -1337,7 +1337,7 @@ int connect_from_tcp_etablished_client(int fd, int fd_srv, ushort srv_port)
 	mydebug("FFF soinf_peer= %p %p %p %p ... %p\n", sp1, sp2, sp3, sp4, soinf_peer);
 #else
 	sock_info *soinf_peer = nullptr;
-	int ii = 0, dT=1;
+	int ii = 0, dT=1000*100;
 
 	// soinf my_addr port se nista nastavljena. Clinet se ni koncal svojega connect().
 	// Oz je koncal z errno=EINPROGRESS, ni pa se dobil syn-ack nazaj.
@@ -1351,7 +1351,7 @@ int connect_from_tcp_etablished_client(int fd, int fd_srv, ushort srv_port)
 	mydebug("  doing sol_find_server_half_connected(peer_fd=%d, peer_addr=0x%08x, peer_port=%d);",
 		-1, ntohl(peer_addr), ntohs(peer_port));
 
-	while(ii++ < 10*1000/dT) {
+	while(ii++ < 1000*1000/dT) {
 		// tale je nasel tudi server listening socket, in ga potem popravil :/
 		// soinf_peer = sol_find_peer(fd, peer_addr, peer_port, false /*allow_inaddr_any*/);
 		soinf_peer = sol_find_server_half_connected(-1, peer_addr, peer_port);
@@ -1420,6 +1420,7 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 	struct sockaddr_in out_addr;
 	uint32_t my_addr = 0x00000000;
 	ushort my_port = 0;
+	fprintf_pos(stderr, "my_addr=0x%08x:%d peer_addr=0x%08x:%d\n", ntohl(my_addr), ntohs(my_port), ntohl(peer_addr), ntohs(peer_port));
 	if (so_bypass_possible(nullptr, peer_port) &&
 		((peer_addr & htonl(0xFFFFFF00)) == (my_ip_addr & htonl(0xFFFFFF00))) /* assume /24 subnet, network byte order */
 		) {
@@ -2202,7 +2203,21 @@ ssize_t sendto_bypass(int fd, const void *buf, size_t len, int flags,
 	assert(soinf->is_bypass);
 	/* vsaj za tcp, bi to zdaj ze moral biti povezano*/
 	peer_fd = soinf->peer_fd;
-	soinf_peer = sol_find_full(soinf->peer_fd, peer_addr, peer_port, fd, soinf->my_addr, soinf->my_port); // should be already connected. TODO - kaj pa ce poslusa na specific IP? Potem bom spet napacen sock_info nasel. Bo reba kar extra flag, ali pa s pointerji povezati.
+
+	/*
+	3 way hanshake morda se ni koncan, in mi ne rata najti soinf_peer takoj
+	Dokler ga ne najdem ne morem podatkov vpisati v ringbuffer.
+	Bi bilo bolje, ce bi podatke dajal v svoj ringbuf, oz ce bi ta fd postal readble sele, ko je 3-way handshake koncan.
+	Za zdaj - isci peer-a v zanki.
+	*/
+	int iimax=10, delay_us=10*1000*1000/iimax, ii;
+	for (ii=0; ii<iimax; ii++) {
+		soinf_peer = sol_find_full(soinf->peer_fd, peer_addr, peer_port, fd, soinf->my_addr, soinf->my_port); // should be already connected. TODO - kaj pa ce poslusa na specific IP? Potem bom spet napacen sock_info nasel. Bo reba kar extra flag, ali pa s pointerji povezati.
+		if (soinf_peer) {
+			break;
+		}
+		usleep(delay_us);
+	}
 	if(soinf_peer == nullptr) {
 		// hm, client je zaprl svoj socket. Recimo...
 		errno = ECONNRESET;
@@ -2532,6 +2547,10 @@ int shutdown(int fd, int how)
 	error = shutdown_af_local(fd, how);
 	if (error != ENOTSOCK) {
 	    return error;
+	}
+	if (sol_find(fd) != nullptr) {
+		// preskoci linux_shutdown(), ker crkne.
+		return 0;
 	}
 	error = linux_shutdown(fd, how);
 	if (error) {
