@@ -1447,6 +1447,11 @@ int connect(int fd, const struct bsd_sockaddr *addr, socklen_t len)
 		}
 		my_addr = out_addr.sin_addr.s_addr;
 		my_port = out_addr.sin_port;
+		// Pa vcasih linux_bind crkne. in getsockname vrne addr=0x00000000. Dam takrat edini zunanji IP, ki je smiseln.
+		if (my_addr == 0x00000000) {
+			my_addr = my_ip_addr;
+			fprintf_pos(stderr, "fd=%d HACK my_addr==0x00000000, force it to 0x%08x\n", fd, ntohl(my_addr));
+		}
 	}
 	fprintf_pos(stderr, "my_addr=0x%08x:%d\n", ntohl(my_addr), ntohs(my_port));
 
