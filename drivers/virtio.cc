@@ -192,7 +192,7 @@ vring* virtio_driver::get_virt_queue(unsigned idx)
 
 void virtio_driver::wait_for_queue(vring* queue, bool (vring::*pred)() const)
 {
-    sched::thread::wait_until([queue,pred] {
+    sched::thread::wait_until([queue,pred] { /**/
         bool have_elements = (queue->*pred)();
         if (!have_elements) {
             queue->enable_interrupts();

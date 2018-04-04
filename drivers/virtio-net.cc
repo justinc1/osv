@@ -130,7 +130,7 @@ static int if_transmit(struct ifnet* ifp, struct mbuf* m_head)
 
     net_d("%s_start", __FUNCTION__);
 
-    return vnet->xmit(m_head);
+    return vnet->xmit(m_head); /**/
 }
 
 inline int net::xmit(struct mbuf* buff)
@@ -228,6 +228,8 @@ bool net::ack_irq()
 
 }
 
+static net* vnet[2] = {nullptr};
+
 net::net(pci::device& dev)
     : virtio_driver(dev),
       _rxq(get_virt_queue(0), [this] { this->receiver(); }),
@@ -288,7 +290,11 @@ net::net(pci::device& dev)
     poll_task->start();
     _txq.start();
 
-    ether_ifattach(_ifn, _config.mac);
+    ether_ifattach(_ifn, _config.mac); /* not promiscous mode? */
+    net_d("%s net=%p _ifn=%p name=eth%d", __FUNCTION__, this, _ifn, _id);
+    if(_id==0 || _id==1) {
+        vnet[_id] = this;
+    }
 
     if (dev.is_msix()) {
         _msi.easy_register({
@@ -316,6 +322,12 @@ net::~net()
     //
     // Since this will involve the rework of the virtio layer - make it for
     // all virtio drivers in a separate patchset.
+
+    for(int ii=0; ii<2; ii++) {
+        if(vnet[ii] == this) {
+            vnet[ii] = nullptr;
+        }
+    }
 
     ether_ifdetach(_ifn);
     if_free(_ifn);
@@ -461,6 +473,7 @@ void net::receiver()
             }
 
             packet.push_back({page + _hdr_size, len - _hdr_size});
+            net_d("%s if=%d packet_len=%d ", __FUNCTION__, _ifn->if_index, len - _hdr_size);
 
             // Read the fragments
             while (--nbufs > 0) {
@@ -479,7 +492,7 @@ void net::receiver()
             auto m_head = packet_to_mbuf(packet);
             packet.clear();
 
-            if ((_ifn->if_capenable & IFCAP_RXCSUM) &&
+            if ((_ifn->if_capenable & IFCAP_RXCSUM) && /* ethernet checksumm offloading? */
                 (mhdr->hdr.flags &
                  net_hdr::VIRTIO_NET_HDR_F_NEEDS_CSUM)) {
                 if (bad_rx_csum(m_head, &mhdr->hdr))
@@ -489,15 +502,22 @@ void net::receiver()
 
             }
 
+            /* a pride lahko en ethernet frame  v vec fragmentih? */
             rx_packets++;
             rx_bytes += m_head->M_dat.MH.MH_pkthdr.len;
 
-            bool fast_path = _ifn->if_classifier.post_packet(m_head);
+            /*bool fast_path = _ifn->if_classifier.post_packet(m_head);
             if (!fast_path) {
                 (*_ifn->if_input)(_ifn, m_head);
-            }
+            }*/
 
             trace_virtio_net_rx_packet(_ifn->if_index, rx_bytes);
+
+            int id2 = 1 - _id;
+            assert(id2 == 0 || id2 == 1);
+            if(vnet[id2]) {
+                vnet[id2]->xmit(m_head);
+            }
 
             // The interface may have been stopped while we were
             // passing the packet up the network stack.
@@ -699,7 +719,7 @@ void net::txq::xmit_one_locked(void* _req)
                     // to ensure that there is at least one Tx interrupt while
                     // we are not running.
                     //
-                    sched::thread::yield(100_us);
+                    //sched::thread::yield(100_us); /* zanimnivo */
                 } while (!vqueue->used_ring_not_empty());
             }
             gc();
@@ -738,7 +758,7 @@ mbuf* net::txq::offload(mbuf* m, net_hdr* hdr)
 
     eh = mtod(m, struct ether_header*);
     eth_type = ntohs(eh->ether_type);
-    if (eth_type == ETHERTYPE_VLAN) {
+    if (eth_type == ETHERTYPE_VLAN) { /**/
         ip_offset = sizeof(struct ether_vlan_header);
         if (m->m_hdr.mh_len < ip_offset) {
             if ((m = m_pullup(m, ip_offset)) == nullptr)
@@ -749,7 +769,7 @@ mbuf* net::txq::offload(mbuf* m, net_hdr* hdr)
     }
 
     switch (eth_type) {
-    case ETHERTYPE_IP:
+    case ETHERTYPE_IP: /**/
         if (m->m_hdr.mh_len < ip_offset + (int)sizeof(struct ip)) {
             m = m_pullup(m, ip_offset + sizeof(struct ip));
             if (m == nullptr)
