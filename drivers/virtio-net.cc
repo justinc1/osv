@@ -39,6 +39,36 @@
 #include <bsd/sys/netinet/udp.h>
 #include <bsd/sys/netinet/tcp.h>
 
+/*------------------------------------------------------*/
+/* WARNING: This code assumes that it is running on a little endian machine (x86) */
+static inline uint16_t
+local_htons(uint16_t v)
+{
+  return (((v & 0xFF) << 8) | ((v & 0xFF00) >> 8));
+}
+
+static inline uint16_t
+local_ntohs(uint16_t v)
+{
+  return (local_htons(v));
+}
+
+static inline uint32_t
+local_htonl(uint32_t v)
+{
+  return (((uint32_t)local_htons(v & 0xFFFF)) << 16) | ((uint32_t)local_htons(v >> 16));
+}
+
+static inline uint32_t
+local_ntohl(uint32_t v)
+{
+  return local_htonl(v);
+}
+
+#define printk printf
+#include "/home/justin_cinkelj/devel/oor/mirage-tcpip/src/tcpip_checksum/vfw_code.c"
+/*------------------------------------------------------*/
+
 TRACEPOINT(trace_virtio_net_rx_packet, "if=%d, len=%d", int, int);
 TRACEPOINT(trace_virtio_net_rx_wake, "");
 TRACEPOINT(trace_virtio_net_fill_rx_ring, "if=%d", int);
@@ -489,6 +519,9 @@ void net::receiver()
                 vq->get_buf_finalize();
             }
 
+            // apply vFW filter
+            int len_vfw = vfw_process_osv((ethernet_frame*)(packet[0].iov_base), packet[0].iov_len);
+
             auto m_head = packet_to_mbuf(packet);
             packet.clear();
 
@@ -516,7 +549,10 @@ void net::receiver()
             int id2 = 1 - _id;
             assert(id2 == 0 || id2 == 1);
             if(vnet[id2]) {
-                vnet[id2]->xmit(m_head);
+                // send out packet only if vFW allows
+                if (len_vfw) {
+                    vnet[id2]->xmit(m_head);
+                }
             }
 
             // The interface may have been stopped while we were
